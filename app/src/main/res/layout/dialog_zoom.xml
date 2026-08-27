@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center"
+    android:orientation="horizontal"
+    android:padding="16dp">
+
+    <Button
+        android:id="@+id/zoom_out"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="@dimen/ext_key_size"
+        android:layout_height="@dimen/ext_key_size"
+        android:minWidth="0dp"
+        android:padding="0dp"
+        android:drawableStart="@drawable/ic_minus"
+        android:drawableTint="@color/brand_primary"
+        tools:ignore="UnusedAttribute" />
+
+    <TextView
+        android:id="@+id/zoom_value"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:textColor="@color/text_primary"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:minWidth="80dp"
+        android:gravity="center" />
+
+    <Button
+        android:id="@+id/zoom_in"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="@dimen/ext_key_size"
+        android:layout_height="@dimen/ext_key_size"
+        android:minWidth="0dp"
+        android:padding="0dp"
+        android:drawableStart="@drawable/ic_plus"
+        android:drawableTint="@color/brand_primary"
+        tools:ignore="UnusedAttribute" />
+</LinearLayout>

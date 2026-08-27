@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_terminal"
+    android:orientation="vertical">
+
+    <ScrollView
+        android:id="@+id/terminal_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <TextView
+            android:id="@+id/terminal_output"
+            style="@style/TerminalText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="8dp"
+            android:textIsSelectable="true" />
+    </ScrollView>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#FF2A2F33" />
+
+    <EditText
+        android:id="@+id/terminal_input"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_terminal_input"
+        android:hint="@string/terminal_hint"
+        android:inputType="text|textNoSuggestions|textMultiLine"
+        android:imeOptions="actionSend"
+        android:maxLines="3"
+        android:padding="10dp"
+        android:textColor="@color/text_terminal"
+        android:textColorHint="#FF8A9197"
+        android:textSize="13sp"
+        android:fontFamily="monospace" />
+</LinearLayout>

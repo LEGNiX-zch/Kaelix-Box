@@ -1,0 +1,54 @@
+<resources>
+    <string name="app_name">Kaelix-Box</string>
+
+    <!-- Bottom nav -->
+    <string name="nav_terminal">终端</string>
+    <string name="nav_settings">设置</string>
+    <string name="nav_about">关于</string>
+
+    <!-- Action bar -->
+    <string name="action_stop_container">终止容器</string>
+    <string name="action_start_vnc">启动VNC</string>
+
+    <!-- Terminal -->
+    <string name="terminal_hint">输入命令并回车…</string>
+    <string name="terminal_empty">未启动容器。请在设置页导入/下载镜像后回到此处。</string>
+
+    <!-- Settings -->
+    <string name="settings_mic_title">容器麦克风音频输入</string>
+    <string name="settings_mic_summary">默认关闭。开启后向 proot 追加音频透传参数，需要重启容器生效。</string>
+    <string name="settings_battery_title">设置无限制省电（忽略电池优化）</string>
+    <string name="settings_battery_summary">跳转系统电池优化设置，把本应用设为无限制，避免后台杀死 proot。</string>
+    <string name="settings_import_image">导入本地 tar / tar.zst 镜像</string>
+    <string name="settings_container_list">容器列表</string>
+    <string name="settings_delete_container">删除容器</string>
+    <string name="settings_switch_container">切换为当前容器</string>
+
+    <!-- About -->
+    <string name="about_nickname_hint">昵称</string>
+    <string name="about_avatar_hint">点击头像选择图片</string>
+
+    <!-- Misc -->
+    <string name="ok">确定</string>
+    <string name="cancel">取消</string>
+    <string name="title_warning">提示</string>
+    <string name="title_error">错误</string>
+    <string name="title_port_allocated">VNC 端口</string>
+    <string name="vnc_password_hint">VNC 密码</string>
+    <string name="ext_keyboard_title">扩展键盘</string>
+    <string name="zoom_title">缩放</string>
+
+    <string name="msg_download_image_failed">镜像下载失败，可手动选择本地 tar / tar.zst 镜像导入。</string>
+    <string name="msg_disk_full">手机剩余磁盘空间不足，已拒绝解压。</string>
+    <string name="msg_image_corrupt">镜像损坏或格式不支持。</string>
+    <string name="msg_mic_needs_restart">修改需要停止并重启容器才生效。</string>
+    <string name="msg_mic_unavailable">音频通路不可用，已禁用麦克风透传（不影响容器运行）。</string>
+    <string name="msg_proot_exec_failed">proot 二进制执行失败，请检查 SELinux / W^X 权限。</string>
+    <string name="msg_no_port_available">5901-5903 端口全部被占用，无法启动 VNC。</string>
+    <string name="msg_vnc_disconnected">VNC 连接已断开。</string>
+    <string name="msg_process_died">容器进程已退出。</string>
+    <string name="msg_killed_by_system">应用被系统杀死，请设置无限制省电（部分国产 ROM 即使设置也可能被杀）。</string>
+    <string name="msg_battery_prompt">为避免后台运行 proot 容器被系统杀死，建议将本应用设为无限制省电。是否前往设置？</string>
+    <string name="msg_permission_storage_denied">存储权限被拒绝，无法读写镜像与容器文件。</string>
+    <string name="msg_using_committed_proot">使用已内置的 proot 副本。</string>
+</resources>
