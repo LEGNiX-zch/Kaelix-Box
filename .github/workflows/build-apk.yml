@@ -3,7 +3,7 @@ name: Build Kaelix‑Box APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # 支持网页手动点击运行
+  workflow_dispatch:
 
 jobs:
   assemble:
@@ -17,6 +17,13 @@ jobs:
         with:
           java‑version: '17'
           distribution: 'temurin'
+
+      # 配置国内Maven镜像，解决依赖下载卡死
+      - name: Configure gradle mirror
+        run: |
+          mkdir -p ~/.gradle
+          echo "systemProp.https.proxyHost=mirrors.cloud.tencent.com" > ~/.gradle/gradle.properties
+          echo "systemProp.https.proxyPort=80" >> ~/.gradle/gradle.properties
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
