@@ -50,34 +50,31 @@ class SplashActivity : AppCompatActivity() {
 
     private fun showImageChoiceDialog() {
         val isArm64 = Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }
-        val items = if (isArm64) {
-            arrayOf(
-                getString(R.string.splash_choose_download),
-                getString(R.string.splash_choose_import)
-            )
-        } else {
-            // 32 位设备仅允许本地导入
-            arrayOf(getString(R.string.splash_choose_import))
-        }
-        // 注意：不使用自定义主题 KaelixAlertDialog，
-        // 该主题继承自 MaterialComponents.Dialog.Alert，与 setItems 列表不兼容，
-        // 会导致选项列表不可见。改用默认主题，动画通过 windowAnimations 应用。
-        val dialog = AlertDialog.Builder(this)
+        // 不使用 setItems：MaterialComponents 主题下 setItems 列表项可能不渲染，
+        // 导致弹窗只有标题和消息、没有可点击选项。改用显式按钮保证一定可见。
+        val builder = AlertDialog.Builder(this)
             .setTitle(R.string.splash_choose_title)
             .setMessage(R.string.splash_choose_message)
             .setCancelable(false)
-            .setItems(items) { _, which ->
-                if (isArm64 && which == 0) {
-                    // 在线下载
-                    DownloadActivity.startForDownload(this)
-                } else {
-                    // 本地导入
-                    DownloadActivity.startForImport(this)
-                }
+
+        if (isArm64) {
+            builder.setPositiveButton(R.string.splash_choose_download) { _, _ ->
+                DownloadActivity.startForDownload(this)
                 overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
             }
-            .show()
-        // 应用弹出/消失动画
+            builder.setNegativeButton(R.string.splash_choose_import) { _, _ ->
+                DownloadActivity.startForImport(this)
+                overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
+            }
+        } else {
+            // 32 位设备仅允许本地导入
+            builder.setPositiveButton(R.string.splash_choose_import) { _, _ ->
+                DownloadActivity.startForImport(this)
+                overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
+            }
+        }
+
+        val dialog = builder.show()
         dialog.window?.attributes?.windowAnimations = R.style.KaelixDialogAnimation
     }
 
