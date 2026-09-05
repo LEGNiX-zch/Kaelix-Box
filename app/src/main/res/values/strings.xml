@@ -27,6 +27,9 @@
     <!-- About -->
     <string name="about_nickname_hint">昵称</string>
     <string name="about_avatar_hint">点击头像选择图片</string>
+    <string name="about_donate">赞赏作者</string>
+    <string name="about_donate_title">赞赏作者</string>
+    <string name="about_donate_tip">感谢您的支持！请长按或截图保存赞赏码。</string>
 
     <!-- Misc -->
     <string name="ok">确定</string>

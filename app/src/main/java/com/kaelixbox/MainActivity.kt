@@ -79,6 +79,18 @@ class MainActivity : AppCompatActivity() {
         ProcessMonitor.start((application as App).appScope, this)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // We're in the foreground again — clear the "might be killed" flag.
+        ProcessMonitor.clearKilledFlag(this)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // We're going to the background — the system may kill us.
+        ProcessMonitor.markForPotentialKill(this)
+    }
+
     // ---------------- ViewPager2 ----------------
 
     private fun setupViewPager() {
@@ -86,10 +98,12 @@ class MainActivity : AppCompatActivity() {
             override fun getItemCount() = fragments.size
             override fun createFragment(position: Int) = fragments[position]
         }
-        // Slide + fade page animation.
+        // Slide + subtle scale animation. Alpha stays at 1.0 because all
+        // fragment roots have opaque backgrounds; fading would show the page
+        // underneath and cause the "overlapping UI" visual bug.
         b.viewPager.setPageTransformer { page, position ->
             val abs = kotlin.math.abs(position)
-            page.alpha = 1f - abs * 0.4f
+            page.alpha = 1f
             page.translationX = -position * page.width * 0.25f
             page.scaleX = 1f - abs * 0.08f
             page.scaleY = 1f - abs * 0.08f

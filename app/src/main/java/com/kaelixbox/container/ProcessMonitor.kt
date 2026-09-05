@@ -41,9 +41,15 @@ object ProcessMonitor {
     }
 
     /**
-     * Called once at app boot. If the previous session was terminated by the
-     * system (we set the flag right before a potential kill), surface a
-     * notice; otherwise mark the flag for next boot.
+     * Called once at app process start (from Application.onCreate, NOT from
+     * Activity.onCreate). If the previous process was killed by the system
+     * we surface a one-time notice.
+     *
+     * The flag is set to true in [markForPotentialKill] (called from
+     * Activity.onPause) and cleared in [clearKilledFlag] (called from
+     * Activity.onResume). A clean foreground→background→foreground cycle
+     * therefore never logs; only an actual process death while backgrounded
+     * leaves the flag set for the next launch.
      */
     fun markBootFlagIfKilled(context: Context) {
         val prefs = AppPrefs.get(context)
@@ -53,12 +59,15 @@ object ProcessMonitor {
                 true
             )
             prefs.setKilledBySystem(false)
-        } else {
-            // Assume we may be killed; cleared on a graceful foreground exit.
-            prefs.setKilledBySystem(true)
         }
     }
 
+    /** Activity.onPause: we may be killed soon. */
+    fun markForPotentialKill(context: Context) {
+        AppPrefs.get(context).setKilledBySystem(true)
+    }
+
+    /** Activity.onResume: we're back, clear the kill flag. */
     fun clearKilledFlag(context: Context) {
         AppPrefs.get(context).setKilledBySystem(false)
     }

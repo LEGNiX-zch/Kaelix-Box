@@ -2,6 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@android:color/white"
     android:gravity="center"
     android:orientation="vertical"
     android:padding="@dimen/page_padding">
@@ -13,8 +14,7 @@
         android:background="@drawable/bg_avatar"
         android:contentDescription="@string/about_avatar_hint"
         android:clipToOutline="true"
-        android:padding="20dp"
-        android:scaleType="fitCenter"
+        android:scaleType="centerCrop"
         android:src="@drawable/ic_nav_about"
         android:tint="#FFFFFFFF" />
 
@@ -51,4 +51,11 @@
         android:text="V0.1  ARM Debian13 Proot 容器管理器"
         android:textColor="@color/text_secondary"
         android:textSize="12sp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_donate"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:text="@string/about_donate" />
 </LinearLayout>

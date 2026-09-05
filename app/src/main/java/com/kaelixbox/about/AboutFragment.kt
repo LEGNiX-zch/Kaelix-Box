@@ -1,6 +1,7 @@
 package com.kaelixbox.about
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -12,6 +13,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import com.kaelixbox.R
+import com.kaelixbox.databinding.DialogDonateBinding
 import com.kaelixbox.databinding.FragmentAboutBinding
 import com.kaelixbox.prefs.AppPrefs
 import com.kaelixbox.util.FileUtils
@@ -68,7 +70,17 @@ class AboutFragment : Fragment() {
             if (!hasFocus) prefs.nickname = b.nickname.text.toString().trim()
         }
         b.avatar.setOnClickListener { pickAvatar.launch(arrayOf("image/*")) }
+        b.btnDonate.setOnClickListener { showDonateDialog() }
         loadAvatar()
+    }
+
+    private fun showDonateDialog() {
+        val db = DialogDonateBinding.inflate(layoutInflater)
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.about_donate_title)
+            .setView(db.root)
+            .setPositiveButton(R.string.ok, null)
+            .show()
     }
 
     private fun loadAvatar() {
@@ -80,9 +92,11 @@ class AboutFragment : Fragment() {
         } else null
         if (bmp != null) {
             b.avatar.imageTintList = null
+            b.avatar.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
             b.avatar.setImageBitmap(bmp)
         } else {
             b.avatar.imageTintList = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
+            b.avatar.scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             b.avatar.setImageResource(R.drawable.ic_nav_about)
         }
     }

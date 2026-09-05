@@ -27,8 +27,27 @@ object FileUtils {
     fun rootfsDir(context: Context, containerId: String): File =
         File(containerRoot(context, containerId), "rootfs")
 
-    fun downloadCacheDir(context: Context): File =
-        File(context.cacheDir, "downloads").apply { mkdirs() }
+    /**
+     * Large-file cache (downloaded Debian image, imported tar archives).
+     *
+     * We prefer the app's external files dir because it lives on the shared
+     * storage partition, which on virtually all devices has far more free
+     * space than the /data partition where cacheDir/filesDir reside. This
+     * is the root cause of the "ENOSPC (No space left on device)" errors
+     * users were seeing even though the phone "had plenty of storage" —
+     * the large archives were being written to /data which was nearly full.
+     */
+    fun downloadCacheDir(context: Context): File {
+        val ext = context.getExternalFilesDir(null)
+        val base = if (ext != null && ext.canWrite()) ext else context.filesDir
+        return File(base, "downloads").apply { mkdirs() }
+    }
+
+    /** Remove stale partial/cached archives before a fresh download/import. */
+    fun cleanDownloadCache(context: Context) {
+        val dir = downloadCacheDir(context)
+        dir.listFiles()?.forEach { it.delete() }
+    }
 
     fun avatarTarget(context: Context): File = File(context.filesDir, "avatar.png")
 

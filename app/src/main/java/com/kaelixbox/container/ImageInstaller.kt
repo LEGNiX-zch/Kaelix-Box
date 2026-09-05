@@ -44,6 +44,9 @@ class ImageInstaller(
         onProgress: (downloaded: Long, total: Long) -> Unit
     ): Result = withContext(Dispatchers.IO) {
         cache.parentFile?.mkdirs()
+        // Clean any stale partial archives from previous failed attempts so
+        // they don't accumulate and exhaust the cache volume.
+        FileUtils.cleanDownloadCache(context)
         try {
             val res = downloadResumable(url, cache, onProgress)
             if (res !is Result.Ok) {
@@ -51,7 +54,11 @@ class ImageInstaller(
                 cache.delete()
                 return@withContext res
             }
-            extractTo(destRootfs, cache)
+            val extractRes = extractTo(destRootfs, cache)
+            // Free the downloaded archive once extracted; the rootfs is now
+            // the source of truth.
+            cache.delete()
+            extractRes
         } catch (e: Throwable) {
             cache.delete()
             log("镜像下载/解压异常: ${e.message ?: e.javaClass.simpleName}", true)
@@ -64,7 +71,13 @@ class ImageInstaller(
         archive: File,
         destRootfs: File
     ): Result = withContext(Dispatchers.IO) {
-        extractTo(destRootfs, archive)
+        // Clean stale cache so an old failed import's copy doesn't sit around.
+        FileUtils.cleanDownloadCache(context)
+        val res = extractTo(destRootfs, archive)
+        // The imported copy lives in the cache dir; remove it after extraction
+        // to keep the cache volume from growing without bound.
+        archive.delete()
+        res
     }
 
     private fun extractTo(destRootfs: File, archive: File): Result {
