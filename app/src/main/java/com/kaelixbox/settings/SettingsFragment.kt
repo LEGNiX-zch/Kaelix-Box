@@ -96,6 +96,15 @@ class SettingsFragment : Fragment() {
         b.btnBattery.setOnClickListener {
             PermissionHelper.openBatteryOptimizationSettings(requireActivity())
         }
+
+        // Mirror URL configuration
+        b.editMirrorUrl.setText(prefs.mirrorUrl)
+        b.editMirrorUrl.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                prefs.mirrorUrl = b.editMirrorUrl.text.toString().trim()
+            }
+        }
+
         b.btnImportImage.setOnClickListener {
             // Verify storage permission each time before any IO.
             if (!PermissionHelper.hasStorage(requireContext())) {
@@ -199,6 +208,12 @@ class SettingsFragment : Fragment() {
                 refreshList()
             }
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Persist mirror URL when leaving settings.
+        AppPrefs.get(requireContext()).mirrorUrl = b.editMirrorUrl.text.toString().trim()
     }
 
     override fun onDestroyView() {

@@ -13,16 +13,14 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Downloads & extracts the prebuilt Debian13 Trixie ARM64 rootfs.
+ * 下载并解压预构建 Debian13 Trixie ARM64 rootfs。
  *
- * Robustness requirements honoured:
- *  - resumable download via HTTP Range (broken download temp is deleted on
- *    failure so we never feed a corrupted prefix to zstd),
- *  - streaming chunked zstd + tar extraction (never loads the whole archive
- *    into memory) via [ZstdExtractor],
- *  - disk-space check BEFORE extraction; we abort & emit a [Result.DiskFull]
- *    so the UI can warn rather than crash,
- *  - all IO happens off the main thread via Dispatchers.IO.
+ * 流程：
+ *  1. 先尝试加速镜像地址，失败回退原始 GitHub Release 直链
+ *  2. 下载完成后校验 SHA256，不匹配则拒绝解压
+ *  3. 解压前检测 APP 沙盒私有目录可用空间，不足返回 DiskFull
+ *  4. 流式 zstd+tar 解压，不将整个压缩包载入内存
+ *  5. 压缩包存 APP 私有 cacheDir，解压输出到 filesDir rootfs
  */
 class ImageInstaller(
     private val context: Context,
@@ -37,26 +35,47 @@ class ImageInstaller(
         data class Failed(val reason: String) : Result()
     }
 
+    /**
+     * 从远程 URL 下载并安装镜像。
+     * 先尝试 [mirrorUrl]，失败后回退 [fallbackUrl]。
+     * 下载完成后若 [expectedSha256] 非空则校验完整性。
+     */
     suspend fun installFromUrl(
-        url: String,
+        mirrorUrl: String,
+        fallbackUrl: String,
+        expectedSha256: String,
         destRootfs: File,
         cache: File,
         onProgress: (downloaded: Long, total: Long) -> Unit
     ): Result = withContext(Dispatchers.IO) {
         cache.parentFile?.mkdirs()
-        // Clean any stale partial archives from previous failed attempts so
-        // they don't accumulate and exhaust the cache volume.
         FileUtils.cleanDownloadCache(context)
         try {
-            val res = downloadResumable(url, cache, onProgress)
+            // 1. 先尝试加速镜像
+            var res = downloadResumable(mirrorUrl, cache, onProgress)
             if (res !is Result.Ok) {
-                // Delete corrupt/partial temp so we never resume from junk.
+                log("加速镜像下载失败(${(res as? Result.Network)?.reason ?: res.javaClass.simpleName})，回退 GitHub 直连…", false)
+                cache.delete()
+                res = downloadResumable(fallbackUrl, cache, onProgress)
+            }
+            if (res !is Result.Ok) {
                 cache.delete()
                 return@withContext res
             }
+
+            // 2. SHA256 校验
+            if (expectedSha256.isNotBlank()) {
+                val actual = FileUtils.sha256File(cache)
+                if (actual == null || !actual.equals(expectedSha256, ignoreCase = true)) {
+                    log("SHA256 校验失败，镜像文件可能已损坏，拒绝解压", true)
+                    cache.delete()
+                    return@withContext Result.Corrupt("SHA256 mismatch")
+                }
+                log("SHA256 校验通过", false)
+            }
+
+            // 3. 解压
             val extractRes = extractTo(destRootfs, cache)
-            // Free the downloaded archive once extracted; the rootfs is now
-            // the source of truth.
             cache.delete()
             extractRes
         } catch (e: Throwable) {
@@ -66,16 +85,13 @@ class ImageInstaller(
         }
     }
 
-    /** Extract a user-imported local tar / tar.zst into a rootfs dir. */
+    /** 解压用户导入的本地 tar / tar.zst 到 rootfs 目录。 */
     suspend fun installFromFile(
         archive: File,
         destRootfs: File
     ): Result = withContext(Dispatchers.IO) {
-        // Clean stale cache so an old failed import's copy doesn't sit around.
         FileUtils.cleanDownloadCache(context)
         val res = extractTo(destRootfs, archive)
-        // The imported copy lives in the cache dir; remove it after extraction
-        // to keep the cache volume from growing without bound.
         archive.delete()
         res
     }
@@ -83,13 +99,14 @@ class ImageInstaller(
     private fun extractTo(destRootfs: File, archive: File): Result {
         destRootfs.mkdirs()
         val required = DiskSpace.estimateDecompressedRequired(archive.length())
-        if (!DiskSpace.hasEnough(destRootfs, required)) {
-            log("磁盘空间不足，拒绝解压 (需要~${required / 1024 / 1024}MiB)", true)
-            return Result.DiskFull(required, DiskSpace.availableBytes(destRootfs))
+        val available = DiskSpace.availableBytes(destRootfs)
+        if (available < required) {
+            log("APP私有存储空间不足：需要~${required / 1024 / 1024}MiB，可用~${available / 1024 / 1024}MiB", true)
+            return Result.DiskFull(required, available)
         }
         log("开始流式解压 ${archive.name} → ${destRootfs.name} …", false)
         var lastEntry = ""
-        val r = ZstdExtractor.extract(archive, destRootfs) { name, size ->
+        val r = ZstdExtractor.extract(archive, destRootfs) { name, _ ->
             lastEntry = name
         }
         return when (r) {
@@ -125,7 +142,6 @@ class ImageInstaller(
                 conn.setRequestProperty("Range", "bytes=$existing-")
             }
             val code = conn.responseCode
-            // 416 Range Not Satisfiable → server doesn't support range; restart.
             if (code == 416) {
                 cache.delete()
                 return downloadResumable(url, cache, onProgress)

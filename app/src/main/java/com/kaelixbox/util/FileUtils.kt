@@ -28,20 +28,14 @@ object FileUtils {
         File(containerRoot(context, containerId), "rootfs")
 
     /**
-     * Large-file cache (downloaded Debian image, imported tar archives).
+     * 下载压缩包缓存目录（APP私有 cacheDir）。
      *
-     * We prefer the app's external files dir because it lives on the shared
-     * storage partition, which on virtually all devices has far more free
-     * space than the /data partition where cacheDir/filesDir reside. This
-     * is the root cause of the "ENOSPC (No space left on device)" errors
-     * users were seeing even though the phone "had plenty of storage" —
-     * the large archives were being written to /data which was nearly full.
+     * 使用 context.cacheDir 而非 externalFilesDir / 公共 Download，
+     * 确保大文件写入 APP 沙盒私有目录，不污染公共存储。
+     * 解压完成后由调用方清理。
      */
-    fun downloadCacheDir(context: Context): File {
-        val ext = context.getExternalFilesDir(null)
-        val base = if (ext != null && ext.canWrite()) ext else context.filesDir
-        return File(base, "downloads").apply { mkdirs() }
-    }
+    fun downloadCacheDir(context: Context): File =
+        File(context.cacheDir, "downloads").apply { mkdirs() }
 
     /** Remove stale partial/cached archives before a fresh download/import. */
     fun cleanDownloadCache(context: Context) {
@@ -98,6 +92,22 @@ object FileUtils {
     fun sha1(text: String): String {
         val md = MessageDigest.getInstance("SHA-1")
         return md.digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
+    /** 计算文件 SHA-256，用于下载镜像完整性校验。 */
+    fun sha256File(file: File): String? = try {
+        val md = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { fis ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = fis.read(buf)
+                if (n <= 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        md.digest().joinToString("") { "%02x".format(it) }
+    } catch (e: Exception) {
+        null
     }
 
     /** Best-effort chmod +x for the proot binary copied out of assets. */

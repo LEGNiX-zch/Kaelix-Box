@@ -50,6 +50,11 @@ class AppPrefs private constructor(private val sp: SharedPreferences) {
     fun wasKilledBySystem(): Boolean = sp.getBoolean(KEY_KILLED_FLAG, false)
     fun setKilledBySystem(v: Boolean) = sp.edit().putBoolean(KEY_KILLED_FLAG, v).apply()
 
+    /** 自定义镜像下载加速地址，留空使用 aka.ms 默认加速。 */
+    var mirrorUrl: String
+        get() = sp.getString(KEY_MIRROR_URL, "") ?: ""
+        set(v) = sp.edit().putString(KEY_MIRROR_URL, v).apply()
+
     companion object {
         private const val KEY_MIC = "mic_passthrough"
         private const val KEY_CURRENT_CONTAINER = "current_container_id"
@@ -61,6 +66,7 @@ class AppPrefs private constructor(private val sp: SharedPreferences) {
         private const val KEY_BATTERY_PROMPT = "battery_prompt_shown"
         private const val KEY_DEFAULT_IMAGE = "default_image_installed"
         private const val KEY_KILLED_FLAG = "killed_by_system"
+        private const val KEY_MIRROR_URL = "mirror_url"
 
         @Volatile private var instance: AppPrefs? = null
         fun get(context: Context): AppPrefs {

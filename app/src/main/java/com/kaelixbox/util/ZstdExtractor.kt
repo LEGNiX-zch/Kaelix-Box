@@ -117,7 +117,18 @@ object ZstdExtractor {
         } catch (e: org.apache.commons.compress.archivers.ArchiveException) {
             Result.Corrupt("archive corrupted: ${e.message ?: "unknown"}")
         } catch (e: IOException) {
-            Result.Corrupt("io error: ${e.message ?: "unknown"}")
+            // ENOSPC during write → DiskFull, not Corrupt; prevents log spam.
+            val msg = e.message ?: ""
+            if (msg.contains("ENOSPC", ignoreCase = true) ||
+                msg.contains("No space left", ignoreCase = true)
+            ) {
+                Result.DiskFull(
+                    DiskSpace.estimateDecompressedRequired(archive.length()),
+                    DiskSpace.availableBytes(destDir)
+                )
+            } else {
+                Result.Corrupt("io error: $msg")
+            }
         } catch (e: Throwable) {
             Result.Failed("unexpected: ${e.message ?: e.javaClass.simpleName}")
         } finally {

@@ -17,6 +17,7 @@ import androidx.viewpager2.widget.ViewPager2
 import com.kaelixbox.about.AboutFragment
 import com.kaelixbox.container.ContainerConfig
 import com.kaelixbox.container.ContainerManager
+import com.kaelixbox.container.ImageConfig
 import com.kaelixbox.container.ImageInstaller
 import com.kaelixbox.container.ProcessMonitor
 import com.kaelixbox.container.TerminalBus
@@ -271,14 +272,20 @@ class MainActivity : AppCompatActivity() {
             isDefaultDebian13 = true,
             vncPassword = ContainerConfig.DEFAULT_VNC_PASS
         )
-        val url = "https://github.com/2cd/debian-museum/releases/download/v1.0/13_trixie_arm64.tar.zst"
-        val cache = java.io.File(FileUtils.downloadCacheDir(this), "debian13.tar.zst")
+        val mirror = ImageConfig.mirrorUrl(prefs.mirrorUrl)
+        val cache = java.io.File(FileUtils.downloadCacheDir(this), ImageConfig.IMAGE_FILENAME)
         val rootfs = FileUtils.rootfsDir(this, cfg.id)
         val installer = ImageInstaller(this) { msg, err -> TerminalBus.appendLine(msg, err) }
 
         (application as App).appScope.launch {
             TerminalBus.appendLine("[image] 后台下载 Debian13 Trixie ARM64 镜像…")
-            val r = installer.installFromUrl(url, rootfs, cache) { dl, total ->
+            val r = installer.installFromUrl(
+                mirrorUrl = mirror,
+                fallbackUrl = ImageConfig.GITHUB_RELEASE_URL,
+                expectedSha256 = ImageConfig.EXPECTED_SHA256,
+                destRootfs = rootfs,
+                cache = cache
+            ) { dl, total ->
                 if (total > 0) {
                     val pct = (dl * 100 / total).toInt()
                     TerminalBus.appendLine("[image] 下载 $pct% (${dl / 1024}KiB)", false)
@@ -292,10 +299,23 @@ class MainActivity : AppCompatActivity() {
                         prefs.markDefaultImageInstalled(true)
                         TerminalBus.appendLine("[image] 镜像就绪，点击三角形 VNC 图标即可启动桌面。")
                     }
+                    is ImageInstaller.Result.DiskFull ->
+                        showDiskFullDialog(r.required, r.available)
                     else -> showDownloadFailedFallback()
                 }
             }
         }
+    }
+
+    private fun showDiskFullDialog(required: Long, available: Long) {
+        val reqMiB = required / 1024 / 1024
+        val availMiB = available / 1024 / 1024
+        AlertDialog.Builder(this)
+            .setTitle(R.string.title_error)
+            .setMessage(getString(R.string.msg_disk_full_detail, reqMiB, availMiB))
+            .setPositiveButton(R.string.ok) { _, _ -> selectPage(1) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun showDownloadFailedFallback() {

@@ -23,6 +23,9 @@
     <string name="settings_container_list">容器列表</string>
     <string name="settings_delete_container">删除容器</string>
     <string name="settings_switch_container">切换为当前容器</string>
+    <string name="settings_mirror_url">下载加速镜像地址</string>
+    <string name="settings_mirror_url_hint">留空使用 aka.ms 默认加速</string>
+    <string name="settings_mirror_url_summary">设置自定义镜像下载加速地址，留空则使用 aka.ms 默认加速节点，失败自动回退 GitHub 直连。</string>
 
     <!-- About -->
     <string name="about_nickname_hint">昵称</string>
@@ -42,7 +45,8 @@
     <string name="zoom_title">缩放</string>
 
     <string name="msg_download_image_failed">镜像下载失败，可手动选择本地 tar / tar.zst 镜像导入。</string>
-    <string name="msg_disk_full">手机剩余磁盘空间不足，已拒绝解压。</string>
+    <string name="msg_disk_full">应用私有存储空间不足，已拒绝解压。</string>
+    <string name="msg_disk_full_detail">应用私有存储空间不足。需要约 %1$dMiB，当前可用 %2$dMiB。请清理应用数据或卸载不必要应用后重试。</string>
     <string name="msg_image_corrupt">镜像损坏或格式不支持。</string>
     <string name="msg_mic_needs_restart">修改需要停止并重启容器才生效。</string>
     <string name="msg_mic_unavailable">音频通路不可用，已禁用麦克风透传（不影响容器运行）。</string>
