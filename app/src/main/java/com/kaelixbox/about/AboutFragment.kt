@@ -1,8 +1,6 @@
 package com.kaelixbox.about
 
-import android.app.Activity
 import android.app.AlertDialog
-import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
@@ -53,31 +51,6 @@ class AboutFragment : Fragment() {
         }
     }
 
-    private val pickDonate = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri == null) return@registerForActivityResult
-        val target = FileUtils.donateImageTarget(requireContext())
-        (requireActivity().application as App).appScope.launch {
-            withContext(Dispatchers.IO) {
-                try {
-                    requireContext().contentResolver.openInputStream(uri).use { input ->
-                        if (input == null) return@withContext
-                        target.outputStream().use { out ->
-                            FileUtils.copyTo(input, out)
-                        }
-                    }
-                } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(requireContext(),
-                            "赞赏码读取失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            withContext(Dispatchers.Main) { showDonateDialog() }
-        }
-    }
-
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -100,24 +73,13 @@ class AboutFragment : Fragment() {
     }
 
     private fun showDonateDialog() {
-        val target = FileUtils.donateImageTarget(requireContext())
-        val bmp = if (target.exists()) {
-            try { BitmapFactory.decodeFile(target.absolutePath) } catch (_: Throwable) { null }
-        } else null
-
-        if (bmp == null) {
-            // No donate image saved yet — ask the user to pick one.
-            AlertDialog.Builder(requireContext())
-                .setTitle(R.string.about_donate_title)
-                .setMessage("请先选择一张赞赏码图片。")
-                .setPositiveButton("选择图片") { _, _ -> pickDonate.launch(arrayOf("image/*")) }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
-            return
-        }
-
         val db = DialogDonateBinding.inflate(layoutInflater)
-        db.donateImage.setImageBitmap(bmp)
+        val resId = resources.getIdentifier("donate_qr", "drawable", requireContext().packageName)
+        if (resId != 0) {
+            db.donateImage.setImageResource(resId)
+        } else {
+            db.donateImage.setImageResource(R.drawable.ic_nav_about)
+        }
         AlertDialog.Builder(requireContext())
             .setTitle(R.string.about_donate_title)
             .setView(db.root)
@@ -145,7 +107,6 @@ class AboutFragment : Fragment() {
 
     override fun onPause() {
         super.onPause()
-        // Persist nickname when leaving the about screen.
         AppPrefs.get(requireContext()).nickname = b.nickname.text.toString().trim()
     }
 

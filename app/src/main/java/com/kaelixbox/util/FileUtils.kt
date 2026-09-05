@@ -51,8 +51,6 @@ object FileUtils {
 
     fun avatarTarget(context: Context): File = File(context.filesDir, "avatar.png")
 
-    fun donateImageTarget(context: Context): File = File(context.filesDir, "donate.png")
-
     /**
      * Stream-copy with an 8KiB buffer. Used for asset extraction & imports.
      */
