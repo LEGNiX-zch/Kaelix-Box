@@ -27,17 +27,24 @@ object XZExtractor {
 
     private const val BUF = 64 * 1024
 
-    fun extract(archive: File, destDir: File, onEntry: ((String, Long) -> Unit)? = null): Result {
+    fun extract(
+        archive: File,
+        destDir: File,
+        onEntry: ((String, Long) -> Unit)? = null,
+        onProgress: ((processed: Long, total: Long) -> Unit)? = null
+    ): Result {
         if (!archive.exists()) return Result.Failed("archive missing: ${archive.absolutePath}")
         destDir.mkdirs()
 
-        val required = DiskSpace.estimateDecompressedRequired(archive.length())
+        val total = archive.length()
+        val required = DiskSpace.estimateDecompressedRequired(total)
         if (!DiskSpace.hasEnough(destDir, required)) {
             return Result.DiskFull(required, DiskSpace.availableBytes(destDir))
         }
 
+        val counter = CountingInputStream { read -> onProgress?.invoke(read, total) }
         val raw: InputStream = try {
-            BufferedInputStream(FileInputStream(archive), BUF)
+            BufferedInputStream(counter.wrap(FileInputStream(archive)), BUF)
         } catch (e: IOException) {
             return Result.Failed("open archive: ${e.message ?: "io error"}")
         }
@@ -134,6 +141,25 @@ object XZExtractor {
 
     private class PushbackStream(src: InputStream, size: Int) :
         java.io.PushbackInputStream(src, size)
+
+    /** 包装输入流，累计读取字节数并回调。用于解压进度估算（按压缩包已读比例）。 */
+    private class CountingInputStream(private val onRead: (Long) -> Unit) {
+        private var read = 0L
+        fun wrap(src: InputStream): InputStream = object : InputStream() {
+            override fun read(): Int {
+                val b = src.read()
+                if (b >= 0) { read++; onRead(read) }
+                return b
+            }
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                val n = src.read(b, off, len)
+                if (n > 0) { read += n; onRead(read) }
+                return n
+            }
+            override fun available() = src.available()
+            override fun close() = src.close()
+        }
+    }
 
     /** 符号链接辅助：不可用时回退为空文件，不中断解压。 */
     private object OsSymlink {

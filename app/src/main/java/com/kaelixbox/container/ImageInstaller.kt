@@ -47,7 +47,9 @@ class ImageInstaller(
         expectedSha256: String,
         destRootfs: File,
         cache: File,
-        onProgress: (downloaded: Long, total: Long) -> Unit
+        onProgress: (downloaded: Long, total: Long) -> Unit,
+        onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null,
+        onStage: ((String) -> Unit)? = null
     ): Result = withContext(Dispatchers.IO) {
         cache.parentFile?.mkdirs()
         FileUtils.cleanDownloadCache(context)
@@ -65,6 +67,7 @@ class ImageInstaller(
             }
 
             // 2. SHA256 校验
+            onStage?.invoke("verify")
             if (expectedSha256.isNotBlank()) {
                 val actual = FileUtils.sha256File(cache)
                 if (actual == null || !actual.equals(expectedSha256, ignoreCase = true)) {
@@ -76,7 +79,8 @@ class ImageInstaller(
             }
 
             // 3. 解压
-            val extractRes = extractTo(destRootfs, cache)
+            onStage?.invoke("extract")
+            val extractRes = extractTo(destRootfs, cache, onExtractProgress)
             cache.delete()
             extractRes
         } catch (e: Throwable) {
@@ -89,16 +93,21 @@ class ImageInstaller(
     /** 解压用户导入的本地 tar.xz / tar.zst / tar 到 rootfs 目录。 */
     suspend fun installFromFile(
         archive: File,
-        destRootfs: File
+        destRootfs: File,
+        onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null
     ): Result = withContext(Dispatchers.IO) {
         FileUtils.cleanDownloadCache(context)
-        val res = extractLocal(destRootfs, archive)
+        val res = extractLocal(destRootfs, archive, onExtractProgress)
         archive.delete()
         res
     }
 
     /** 在线下载分支：默认镜像为 tar.xz，固定走 XZ 解压。 */
-    private fun extractTo(destRootfs: File, archive: File): Result {
+    private fun extractTo(
+        destRootfs: File,
+        archive: File,
+        onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null
+    ): Result {
         destRootfs.mkdirs()
         val required = DiskSpace.estimateDecompressedRequired(archive.length())
         val available = DiskSpace.availableBytes(destRootfs)
@@ -108,9 +117,10 @@ class ImageInstaller(
         }
         log("开始流式解压 ${archive.name} → ${destRootfs.name} …", false)
         var lastEntry = ""
-        val r = XZExtractor.extract(archive, destRootfs) { name, _ ->
-            lastEntry = name
-        }
+        val r = XZExtractor.extract(archive, destRootfs,
+            onEntry = { name, _ -> lastEntry = name },
+            onProgress = onExtractProgress
+        )
         return mapResult(r, lastEntry)
     }
 
@@ -120,7 +130,11 @@ class ImageInstaller(
      *  - tar.zst → ZstdExtractor
      *  - 其他/纯 tar → 按 xz 路径兜底（XZExtractor 支持纯 tar）
      */
-    private fun extractLocal(destRootfs: File, archive: File): Result {
+    private fun extractLocal(
+        destRootfs: File,
+        archive: File,
+        onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null
+    ): Result {
         destRootfs.mkdirs()
         val required = DiskSpace.estimateDecompressedRequired(archive.length())
         val available = DiskSpace.availableBytes(destRootfs)
@@ -132,9 +146,15 @@ class ImageInstaller(
         log("开始流式解压 ${archive.name} (${if (isZst) "zstd" else "xz/tar"}) → ${destRootfs.name} …", false)
         var lastEntry = ""
         val r = if (isZst) {
-            ZstdExtractor.extract(archive, destRootfs) { name, _ -> lastEntry = name }
+            ZstdExtractor.extract(archive, destRootfs,
+                onEntry = { name, _ -> lastEntry = name },
+                onProgress = onExtractProgress
+            )
         } else {
-            XZExtractor.extract(archive, destRootfs) { name, _ -> lastEntry = name }
+            XZExtractor.extract(archive, destRootfs,
+                onEntry = { name, _ -> lastEntry = name },
+                onProgress = onExtractProgress
+            )
         }
         return mapResult(r, lastEntry)
     }

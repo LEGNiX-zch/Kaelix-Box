@@ -4,12 +4,14 @@ import android.content.Context
 import com.kaelixbox.App
 import com.kaelixbox.prefs.AppPrefs
 import com.kaelixbox.util.FileUtils
+import com.kaelixbox.util.PtyHelper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.io.InputStreamReader
 import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.io.Writer
@@ -31,9 +33,11 @@ object ContainerManager {
     private val running = AtomicBoolean(false)
     private val procRef = AtomicReference<Process?>(null)
     private val stdinRef = AtomicReference<Writer?>(null)
+    private val ptyRef = AtomicReference<PtyHelper.PtyPair?>(null)
     @Volatile var currentConfig: ContainerConfig? = null
         private set
     @Volatile var onDied: (() -> Unit)? = null
+    @Volatile var onStateChanged: ((Boolean) -> Unit)? = null
 
     // ---------- container list persistence ----------
 
@@ -114,11 +118,23 @@ object ContainerManager {
         pb.environment()["PATH"] = "/system/bin:/system/xbin"
         pb.environment()["TMPDIR"] = context.cacheDir.absolutePath
 
+        // 尝试分配 pty，让 bash 以交互模式运行并恢复行缓冲输出。
+        // 失败则回退到管道模式（非交互，输出可能全缓冲）。
+        val pty = PtyHelper.open()
+        if (pty != null) {
+            val slave = File(pty.slavePath)
+            pb.redirectInput(slave)
+            pb.redirectOutput(slave)
+            pb.redirectError(slave)
+            TerminalBus.appendLine("[proot] 已分配 PTY，终端交互模式已启用。", false)
+        } else {
+            TerminalBus.appendLine("[proot] 未分配到 PTY，回退管道模式（输出可能延迟）。", true)
+        }
+
         val proc = try {
             pb.start()
         } catch (e: IOException) {
-            // SELinux / W^X exec failures land here. Surface the error rather
-            // than crashing the app.
+            pty?.close()
             TerminalBus.appendLine(
                 "[proot] 二进制执行失败: ${e.message}\n[proot] 请检查 SELinux/W^X 权限，或重新安装 APK。",
                 true
@@ -126,23 +142,26 @@ object ContainerManager {
             return
         }
         procRef.set(proc)
+        ptyRef.set(pty)
         currentConfig = cfg
         running.set(true)
+        onStateChanged?.invoke(true)
 
-        // stdout/stderr pump.
-        val out = proc.inputStream
-        val err = proc.errorStream
+        // stdout/stderr pump：有 pty 时从 master 读，否则从管道读。
+        val out: InputStream = pty?.masterIn ?: proc.inputStream
         streamToBus(out, false)
-        streamToBus(err, true)
+        // pty 模式下 stderr 已合并到 master；管道模式下 redirectErrorStream(true) 也已合并。
 
-        // stdin sink — terminal writes commands through this.
-        stdinRef.set(OutputStreamWriter(proc.outputStream, Charsets.UTF_8))
+        // stdin sink：有 pty 时写 master，否则写管道。
+        val outStream: OutputStream = pty?.masterOut ?: proc.outputStream
+        stdinRef.set(OutputStreamWriter(outStream, Charsets.UTF_8))
 
         // Waiter: detect abnormal exit.
         Thread({
             try {
                 val code = proc.waitFor()
                 running.set(false)
+                onStateChanged?.invoke(false)
                 stdinRef.getAndSet(null)?.runCatching { close() }
                 TerminalBus.appendLine("[container] proot 进程退出 code=$code", code != 0)
                 if (code != 0) onDied?.invoke()
@@ -195,8 +214,6 @@ object ContainerManager {
     fun stop(context: Context) {
         running.set(false)
         val proc = procRef.getAndSet(null) ?: return
-        // Try to gracefully kill vncserver first (if any) so the port is freed
-        // for the next session; then destroy proot.
         try {
             Runtime.getRuntime().exec(arrayOf("/system/bin/sh", "-c",
                 "pkill -9 -f vncserver; pkill -9 -f Xtightvnc; pkill -9 -f Xtigervnc"))
@@ -205,6 +222,7 @@ object ContainerManager {
         proc.destroy()
         procRef.set(null)
         stdinRef.getAndSet(null)?.runCatching { close() }
+        ptyRef.getAndSet(null)?.runCatching { close() }
         TerminalBus.appendLine("[container] 容器已终止。")
     }
 
@@ -213,9 +231,9 @@ object ContainerManager {
         running.set(false)
         procRef.getAndSet(null)?.runCatching {
             destroy()
-            // proot creates a session; pkill descendants too
         }
         stdinRef.getAndSet(null)?.runCatching { close() }
+        ptyRef.getAndSet(null)?.runCatching { close() }
         try {
             Runtime.getRuntime().exec(arrayOf("/system/bin/sh", "-c",
                 "pkill -9 -f proot; pkill -9 -f vncserver; pkill -9 -f Xtightvnc; pkill -9 -f Xtigervnc"))

@@ -8,6 +8,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.widget.Button
 import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
@@ -30,8 +31,9 @@ class TerminalFragment : Fragment() {
     private var output: TextView? = null
     private var input: EditText? = null
     private var scroll: ScrollView? = null
+    private var startBar: View? = null
+    private var startBtn: Button? = null
     private var sub: TerminalBus.Subscription? = null
-    private val pending = StringBuilder()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -42,6 +44,8 @@ class TerminalFragment : Fragment() {
         output = v.findViewById(R.id.terminal_output)
         input = v.findViewById(R.id.terminal_input)
         scroll = v.findViewById(R.id.terminal_scroll)
+        startBar = v.findViewById(R.id.start_container_bar)
+        startBtn = v.findViewById(R.id.btn_start_container)
         output?.movementMethod = ScrollingMovementMethod()
 
         input?.setOnEditorActionListener { _, actionId, _ ->
@@ -60,7 +64,19 @@ class TerminalFragment : Fragment() {
                 true
             } else false
         }
+        startBtn?.setOnClickListener { startContainer() }
         return v
+    }
+
+    private fun startContainer() {
+        val ctx = context ?: return
+        val cfg = ContainerManager.current(ctx) ?: run {
+            TerminalBus.appendLine("[terminal] 未选择容器，请先在设置页导入镜像。", true)
+            return
+        }
+        if (ContainerManager.isRunning) return
+        val mic = com.kaelixbox.prefs.AppPrefs.get(ctx).micPassthroughEnabled()
+        ContainerManager.start(ctx, cfg, mic)
     }
 
     private fun submit() {
@@ -84,20 +100,32 @@ class TerminalFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        val out = output ?: return
+        // subscribe 内部已回放历史缓冲，无需再 append snapshot，
+        // 否则切换页面时历史会被重复追加导致无限堆积。
         sub = TerminalBus.subscribe { chunk ->
             requireActivity().runOnUiThread {
                 appendText(chunk.toString())
             }
         }
-        appendText(TerminalBus.snapshot())
+        updateContainerState(ContainerManager.isRunning)
+        ContainerManager.onStateChanged = { running ->
+            requireActivity().runOnUiThread { updateContainerState(running) }
+        }
         postScroll()
+    }
+
+    private fun updateContainerState(running: Boolean) {
+        input?.isEnabled = running
+        input?.hint = if (running) getString(R.string.terminal_hint)
+        else getString(R.string.terminal_disabled_hint)
+        startBar?.visibility = if (running) View.GONE else View.VISIBLE
     }
 
     override fun onPause() {
         super.onPause()
         sub?.unsubscribe()
         sub = null
+        ContainerManager.onStateChanged = null
     }
 
     private fun appendText(text: CharSequence) {

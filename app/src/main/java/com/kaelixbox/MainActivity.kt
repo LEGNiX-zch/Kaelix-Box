@@ -3,7 +3,6 @@ package com.kaelixbox
 import android.app.AlertDialog
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
@@ -18,8 +17,6 @@ import androidx.viewpager2.widget.ViewPager2
 import com.kaelixbox.about.AboutFragment
 import com.kaelixbox.container.ContainerConfig
 import com.kaelixbox.container.ContainerManager
-import com.kaelixbox.container.ImageConfig
-import com.kaelixbox.container.ImageInstaller
 import com.kaelixbox.container.ProcessMonitor
 import com.kaelixbox.container.TerminalBus
 import com.kaelixbox.container.XFCEInstaller
@@ -27,14 +24,10 @@ import com.kaelixbox.databinding.ActivityMainBinding
 import com.kaelixbox.prefs.AppPrefs
 import com.kaelixbox.settings.SettingsFragment
 import com.kaelixbox.terminal.TerminalFragment
-import com.kaelixbox.util.FileUtils
 import com.kaelixbox.util.PermissionHelper
 import com.kaelixbox.vnc.VncFragment
 import com.kaelixbox.vnc.VncHost
 import com.kaelixbox.vnc.VncSession
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -63,7 +56,6 @@ class MainActivity : AppCompatActivity() {
 
         PermissionHelper.requestStorage(this)
         promptBatteryOptimization()
-        maybeInstallDefaultImage()
 
         ContainerManager.onDied = {
             runOnUiThread {
@@ -243,7 +235,7 @@ class MainActivity : AppCompatActivity() {
         vncFragment = null
     }
 
-    // ---------------- battery + first-launch image ----------------
+    // ---------------- battery optimization prompt ----------------
 
     private fun promptBatteryOptimization() {
         val prefs = AppPrefs.get(this)
@@ -256,98 +248,6 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton(R.string.cancel, null)
             .setOnDismissListener { prefs.markBatteryPromptShown() }
-            .show()
-    }
-
-    private fun maybeInstallDefaultImage() {
-        val prefs = AppPrefs.get(this)
-        if (prefs.defaultImageInstalled()) return
-        if (ContainerManager.listContainers(this).isNotEmpty()) {
-            prefs.markDefaultImageInstalled(true); return
-        }
-        // 默认镜像仅支持 arm64，32 位设备禁止自动下载，引导手动导入。
-        if (!isArm64Device()) {
-            TerminalBus.appendLine("[image] 当前设备为 32 位架构，默认 arm64 镜像不可用，请在设置页手动导入对应 32 位镜像。", true)
-            show32BitImportHint()
-            return
-        }
-        val cfg = ContainerConfig(
-            id = "debian13-default",
-            name = ContainerConfig.DEFAULT_NAME,
-            arch = ContainerConfig.DEFAULT_ARCH,
-            distribution = ContainerConfig.DEFAULT_DISTRO,
-            isDefaultDebian13 = true,
-            vncPassword = ContainerConfig.DEFAULT_VNC_PASS
-        )
-        val mirror = ImageConfig.mirrorUrl(prefs.mirrorUrl)
-        val cache = java.io.File(FileUtils.downloadCacheDir(this), ImageConfig.IMAGE_FILENAME)
-        val rootfs = FileUtils.rootfsDir(this, cfg.id)
-        val installer = ImageInstaller(this) { msg, err -> TerminalBus.appendLine(msg, err) }
-
-        (application as App).appScope.launch {
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, R.string.msg_wifi_hint, Toast.LENGTH_LONG).show()
-            }
-            TerminalBus.appendLine("[image] 该镜像体积较大，建议 WiFi 环境下载。", false)
-            TerminalBus.appendLine("[image] 后台下载 Debian13 XFCE ARM64 镜像…", false)
-            val r = installer.installFromUrl(
-                mirrorUrl = mirror,
-                fallbackUrl = ImageConfig.GITHUB_RELEASE_URL,
-                expectedSha256 = ImageConfig.EXPECTED_SHA256,
-                destRootfs = rootfs,
-                cache = cache
-            ) { dl, total ->
-                if (total > 0) {
-                    val pct = (dl * 100 / total).toInt()
-                    TerminalBus.appendLine("[image] 下载 $pct% (${dl / 1024}KiB)", false)
-                }
-            }
-            withContext(Dispatchers.Main) {
-                when (r) {
-                    is ImageInstaller.Result.Ok -> {
-                        ContainerManager.addContainer(this@MainActivity, cfg)
-                        AppPrefs.get(this@MainActivity).currentContainerId = cfg.id
-                        prefs.markDefaultImageInstalled(true)
-                        TerminalBus.appendLine("[image] 镜像就绪，点击三角形 VNC 图标即可启动桌面。")
-                    }
-                    is ImageInstaller.Result.DiskFull ->
-                        showDiskFullDialog(r.required, r.available)
-                    else -> showDownloadFailedFallback()
-                }
-            }
-        }
-    }
-
-    /** 设备是否支持 arm64-v8a。 */
-    private fun isArm64Device(): Boolean =
-        Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }
-
-    private fun show32BitImportHint() {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.title_warning)
-            .setMessage(R.string.msg_32bit_import_hint)
-            .setPositiveButton(R.string.ok) { _, _ -> selectPage(1) }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
-
-    private fun showDiskFullDialog(required: Long, available: Long) {
-        val reqMiB = required / 1024 / 1024
-        val availMiB = available / 1024 / 1024
-        AlertDialog.Builder(this)
-            .setTitle(R.string.title_error)
-            .setMessage(getString(R.string.msg_disk_full_detail, reqMiB, availMiB))
-            .setPositiveButton(R.string.ok) { _, _ -> selectPage(1) }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
-
-    private fun showDownloadFailedFallback() {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.title_error)
-            .setMessage(R.string.msg_download_image_failed)
-            .setPositiveButton(R.string.ok) { _, _ -> selectPage(1) }
-            .setNegativeButton(R.string.cancel, null)
             .show()
     }
 

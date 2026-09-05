@@ -9,9 +9,11 @@
     <!-- Action bar -->
     <string name="action_stop_container">终止容器</string>
     <string name="action_start_vnc">启动VNC</string>
+    <string name="action_start_container">启动容器</string>
 
     <!-- Terminal -->
     <string name="terminal_hint">输入命令并回车…</string>
+    <string name="terminal_disabled_hint">容器未就绪，无法输入命令</string>
     <string name="terminal_empty">未启动容器。请在设置页导入/下载镜像后回到此处。</string>
 
     <!-- Settings -->
@@ -60,4 +62,28 @@
     <string name="msg_battery_prompt">为避免后台运行 proot 容器被系统杀死，建议将本应用设为无限制省电。是否前往设置？</string>
     <string name="msg_permission_storage_denied">存储权限被拒绝，无法读写镜像与容器文件。</string>
     <string name="msg_using_committed_proot">使用已内置的 proot 副本。</string>
+
+    <!-- Splash / Image selection -->
+    <string name="splash_choose_title">选择镜像来源</string>
+    <string name="splash_choose_message">首次使用需要准备 rootfs 容器镜像，请选择获取方式。</string>
+    <string name="splash_choose_download">自动下载云端镜像</string>
+    <string name="splash_choose_import">自行本地导入镜像</string>
+
+    <!-- Download / Extract progress screen -->
+    <string name="stage_download">正在下载镜像…</string>
+    <string name="stage_verify">正在校验 SHA256…</string>
+    <string name="stage_extract">正在解压 rootfs…</string>
+    <string name="stage_done">准备完成</string>
+    <string name="download_percent">%1$d%%</string>
+    <string name="download_size">%1$s / %2$s</string>
+    <string name="download_speed">%1$s/s</string>
+    <string name="extract_percent">解压中 %1$d%%</string>
+    <string name="extract_indeterminate">正在解压，请勿关闭应用…</string>
+    <string name="btn_cancel">取消</string>
+    <string name="btn_retry">重试</string>
+    <string name="btn_enter_app">进入应用</string>
+    <string name="msg_sha256_failed">SHA256 校验失败，镜像文件可能已损坏。请重试下载。</string>
+    <string name="msg_extract_success">镜像解压完成，已就绪。</string>
+    <string name="msg_import_success">本地镜像导入完成，已就绪。</string>
+    <string name="msg_download_only_arm64">当前设备为 32 位架构，仅支持本地导入对应镜像。</string>
 </resources>
