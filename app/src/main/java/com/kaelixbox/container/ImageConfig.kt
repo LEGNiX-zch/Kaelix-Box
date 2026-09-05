@@ -22,7 +22,7 @@ object ImageConfig {
      * 官方 Release 未发布该文件的 sha256sum，默认留空跳过；
      * 如需启用，请手动填入 debian-xfce.tar.xz 的 sha256sum。
      */
-    const val EXPECTED_SHA256 = ""
+    const val EXPECTED_SHA256 = "1da3c9cca2d7c0d69e965be707971db080fea1bcf2217005534fee56a4a669b0"
 
     /**
      * 返回生效的加速镜像地址：用户自定义 > aka.ms 默认。
