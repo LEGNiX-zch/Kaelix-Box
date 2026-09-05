@@ -3,6 +3,7 @@ package com.kaelixbox
 import android.app.AlertDialog
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
@@ -264,6 +265,12 @@ class MainActivity : AppCompatActivity() {
         if (ContainerManager.listContainers(this).isNotEmpty()) {
             prefs.markDefaultImageInstalled(true); return
         }
+        // 默认镜像仅支持 arm64，32 位设备禁止自动下载，引导手动导入。
+        if (!isArm64Device()) {
+            TerminalBus.appendLine("[image] 当前设备为 32 位架构，默认 arm64 镜像不可用，请在设置页手动导入对应 32 位镜像。", true)
+            show32BitImportHint()
+            return
+        }
         val cfg = ContainerConfig(
             id = "debian13-default",
             name = ContainerConfig.DEFAULT_NAME,
@@ -278,7 +285,11 @@ class MainActivity : AppCompatActivity() {
         val installer = ImageInstaller(this) { msg, err -> TerminalBus.appendLine(msg, err) }
 
         (application as App).appScope.launch {
-            TerminalBus.appendLine("[image] 后台下载 Debian13 Trixie ARM64 镜像…")
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@MainActivity, R.string.msg_wifi_hint, Toast.LENGTH_LONG).show()
+            }
+            TerminalBus.appendLine("[image] 该镜像体积较大，建议 WiFi 环境下载。", false)
+            TerminalBus.appendLine("[image] 后台下载 Debian13 XFCE ARM64 镜像…", false)
             val r = installer.installFromUrl(
                 mirrorUrl = mirror,
                 fallbackUrl = ImageConfig.GITHUB_RELEASE_URL,
@@ -305,6 +316,19 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /** 设备是否支持 arm64-v8a。 */
+    private fun isArm64Device(): Boolean =
+        Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }
+
+    private fun show32BitImportHint() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.title_warning)
+            .setMessage(R.string.msg_32bit_import_hint)
+            .setPositiveButton(R.string.ok) { _, _ -> selectPage(1) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun showDiskFullDialog(required: Long, available: Long) {
