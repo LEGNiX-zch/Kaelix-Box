@@ -59,7 +59,10 @@ class SplashActivity : AppCompatActivity() {
             // 32 位设备仅允许本地导入
             arrayOf(getString(R.string.splash_choose_import))
         }
-        AlertDialog.Builder(this, R.style.KaelixAlertDialog)
+        // 注意：不使用自定义主题 KaelixAlertDialog，
+        // 该主题继承自 MaterialComponents.Dialog.Alert，与 setItems 列表不兼容，
+        // 会导致选项列表不可见。改用默认主题，动画通过 windowAnimations 应用。
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.splash_choose_title)
             .setMessage(R.string.splash_choose_message)
             .setCancelable(false)
@@ -74,6 +77,8 @@ class SplashActivity : AppCompatActivity() {
                 overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
             }
             .show()
+        // 应用弹出/消失动画
+        dialog.window?.attributes?.windowAnimations = R.style.KaelixDialogAnimation
     }
 
     private fun goMain() {

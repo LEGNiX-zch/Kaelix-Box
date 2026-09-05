@@ -247,22 +247,22 @@ class DownloadActivity : AppCompatActivity() {
             }
             is ImageInstaller.Result.Corrupt -> {
                 if (isDownload && r.reason == "SHA256 mismatch") {
-                    AlertDialog.Builder(this, R.style.KaelixAlertDialog)
+                    AlertDialog.Builder(this)
                         .setTitle(R.string.title_error)
                         .setMessage(R.string.msg_sha256_failed)
                         .setPositiveButton(R.string.btn_retry) { _, _ -> startTask() }
                         .setNegativeButton(R.string.cancel) { _, _ -> finish() }
-                        .show()
+                        .showAnimated()
                 } else {
-                    AlertDialog.Builder(this, R.style.KaelixAlertDialog)
+                    AlertDialog.Builder(this)
                         .setTitle(R.string.title_error)
                         .setMessage(R.string.msg_image_corrupt)
                         .setPositiveButton(R.string.ok) { _, _ -> finish() }
-                        .show()
+                        .showAnimated()
                 }
             }
             else -> {
-                AlertDialog.Builder(this, R.style.KaelixAlertDialog)
+                AlertDialog.Builder(this)
                     .setTitle(R.string.title_error)
                     .setMessage(R.string.msg_download_image_failed)
                     .setPositiveButton(R.string.btn_retry) { _, _ ->
@@ -270,7 +270,7 @@ class DownloadActivity : AppCompatActivity() {
                         else pickFile.launch(arrayOf("*/*"))
                     }
                     .setNegativeButton(R.string.cancel) { _, _ -> finish() }
-                    .show()
+                    .showAnimated()
             }
         }
     }
@@ -278,11 +278,22 @@ class DownloadActivity : AppCompatActivity() {
     private fun showDiskFullDialog(required: Long, available: Long) {
         val reqMiB = required / 1024 / 1024
         val availMiB = available / 1024 / 1024
-        AlertDialog.Builder(this, R.style.KaelixAlertDialog)
+        AlertDialog.Builder(this)
             .setTitle(R.string.title_error)
             .setMessage(getString(R.string.msg_disk_full_detail, reqMiB, availMiB))
             .setPositiveButton(R.string.ok) { _, _ -> finish() }
-            .show()
+            .showAnimated()
+    }
+
+    /**
+     * 构建并显示对话框，同时应用弹出/消失动画。
+     * 不使用自定义主题构建器，避免 MaterialComponents 主题与 setItems 等不兼容。
+     */
+    private fun AlertDialog.Builder.showAnimated(): AlertDialog {
+        val d = create()
+        d.window?.attributes?.windowAnimations = R.style.KaelixDialogAnimation
+        d.show()
+        return d
     }
 
     /**
