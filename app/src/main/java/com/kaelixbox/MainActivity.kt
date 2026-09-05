@@ -12,6 +12,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
+import androidx.viewpager2.adapter.FragmentStateAdapter
+import androidx.viewpager2.widget.ViewPager2
 import com.kaelixbox.about.AboutFragment
 import com.kaelixbox.container.ContainerConfig
 import com.kaelixbox.container.ContainerManager
@@ -35,101 +37,117 @@ import kotlinx.coroutines.withContext
 class MainActivity : AppCompatActivity() {
 
     private lateinit var b: ActivityMainBinding
-    private val terminal = TerminalFragment()
-    private val settings = SettingsFragment()
-    private val about = AboutFragment()
+    private val fragments: List<Fragment> = listOf(
+        TerminalFragment(),
+        SettingsFragment(),
+        AboutFragment()
+    )
+    private val pageIds = listOf(R.id.nav_terminal, R.id.nav_settings, R.id.nav_about)
 
-    private var current: Fragment = terminal
+    private var vncFragment: VncFragment? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         b = ActivityMainBinding.inflate(layoutInflater)
         setContentView(b.root)
         setSupportActionBar(b.toolbar)
-        supportActionBar?.title = null  // we render our own title TextView
+        supportActionBar?.title = null
 
+        setupViewPager()
         setupBottomNav()
-        switchTo(terminal)
 
         b.btnStopContainer.setOnClickListener { stopContainer() }
         b.btnStartVnc.setOnClickListener { startVnc() }
 
-        // Startup requirements: storage permission, battery prompt,
-        // first-launch default image download.
         PermissionHelper.requestStorage(this)
         promptBatteryOptimization()
         maybeInstallDefaultImage()
 
-        // Wire watchdogs.
         ContainerManager.onDied = {
             runOnUiThread {
                 if (VncHost.session != null) closeVnc()
                 Toast.makeText(this, R.string.msg_process_died, Toast.LENGTH_LONG).show()
-                switchTo(terminal)
+                selectPage(0)
             }
         }
         ProcessMonitor.onContainerDied = {
-            runOnUiThread { if (VncHost.session != null) closeVnc(); switchTo(terminal) }
+            runOnUiThread {
+                if (VncHost.session != null) closeVnc()
+                selectPage(0)
+            }
         }
         ProcessMonitor.start((application as App).appScope, this)
     }
 
+    // ---------------- ViewPager2 ----------------
+
+    private fun setupViewPager() {
+        b.viewPager.adapter = object : FragmentStateAdapter(this) {
+            override fun getItemCount() = fragments.size
+            override fun createFragment(position: Int) = fragments[position]
+        }
+        // Slide + fade page animation.
+        b.viewPager.setPageTransformer { page, position ->
+            val abs = kotlin.math.abs(position)
+            page.alpha = 1f - abs * 0.4f
+            page.translationX = -position * page.width * 0.25f
+            page.scaleX = 1f - abs * 0.08f
+            page.scaleY = 1f - abs * 0.08f
+        }
+        b.viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                super.onPageSelected(position)
+                updateNavHighlight(position)
+                val frag = fragments[position]
+                val iconsVisible = frag is TerminalFragment
+                b.btnStopContainer.visibility = if (iconsVisible) View.VISIBLE else View.GONE
+                b.btnStartVnc.visibility = if (iconsVisible) View.VISIBLE else View.GONE
+            }
+        })
+    }
+
+    private fun selectPage(index: Int) {
+        if (b.viewPager.currentItem != index) {
+            b.viewPager.setCurrentItem(index, true)
+        } else {
+            updateNavHighlight(index)
+        }
+    }
+
     // ---------------- bottom navigation ----------------
 
-    private data class NavSpec(val icon: Int, val label: Int, val fragment: Fragment)
-    private val navs = linkedMapOf(
-        R.id.nav_terminal to NavSpec(R.drawable.ic_nav_terminal, R.string.nav_terminal, terminal),
-        R.id.nav_settings to NavSpec(R.drawable.ic_nav_settings, R.string.nav_settings, settings),
-        R.id.nav_about to NavSpec(R.drawable.ic_nav_about, R.string.nav_about, about)
+    private data class NavSpec(val icon: Int, val label: Int)
+    private val navs = listOf(
+        NavSpec(R.drawable.ic_nav_terminal, R.string.nav_terminal),
+        NavSpec(R.drawable.ic_nav_settings, R.string.nav_settings),
+        NavSpec(R.drawable.ic_nav_about, R.string.nav_about)
     )
 
     private fun setupBottomNav() {
-        navs.forEach { (id, spec) ->
-            val item = b.root.findViewById<LinearLayout>(id)
+        navs.forEachIndexed { index, spec ->
+            val item = b.root.findViewById<LinearLayout>(pageIds[index])
             item.findViewById<ImageView>(R.id.nav_icon).setImageResource(spec.icon)
             item.findViewById<TextView>(R.id.nav_label).setText(spec.label)
             item.setOnClickListener {
-                if (current == spec.fragment) return@setOnClickListener
-                // VNC has its own chrome; switching away from it tears it down.
-                if (current is VncFragment) closeVnc()
-                switchTo(spec.fragment)
-                navs.keys.forEach { otherId ->
-                    b.root.findViewById<View>(otherId).isActivated = (otherId == id)
-                }
+                if (vncFragment != null) closeVnc()
+                selectPage(index)
             }
         }
-        // Default highlight = terminal.
-        b.navTerminal.root.isActivated = true
+        updateNavHighlight(0)
     }
 
-    private fun switchTo(fragment: Fragment) {
-        current = fragment
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.content_frame, fragment)
-            .commitAllowingStateLoss()
-        // Update nav highlight.
-        val id = when (fragment) {
-            terminal -> R.id.nav_terminal
-            settings -> R.id.nav_settings
-            about -> R.id.nav_about
-            else -> -1
+    private fun updateNavHighlight(selected: Int) {
+        pageIds.forEachIndexed { index, id ->
+            b.root.findViewById<View>(id).isActivated = (index == selected)
         }
-        navs.keys.forEach { oid ->
-            b.root.findViewById<View>(oid).isActivated = (oid == id)
-        }
-        // Action bar icons only meaningful on terminal + vnc; hide on others.
-        val iconsVisible = fragment is TerminalFragment || fragment is VncFragment
-        b.btnStopContainer.visibility = if (iconsVisible) View.VISIBLE else View.GONE
-        b.btnStartVnc.visibility = if (iconsVisible) View.VISIBLE else View.GONE
     }
 
     // ---------------- action bar buttons ----------------
 
     private fun stopContainer() {
-        // Tear down VNC chrome first, then kill proot.
         if (VncHost.session != null) closeVnc()
         ContainerManager.stop(this)
-        switchTo(terminal)
+        selectPage(0)
     }
 
     private fun startVnc() {
@@ -137,13 +155,9 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.terminal_empty, Toast.LENGTH_LONG).show()
             return
         }
-        // Ensure the container is running. If it isn't, boot it now (and run
-        // the XFCE installer hook for the default Debian13 container).
         if (!ContainerManager.isRunning) {
             val mic = AppPrefs.get(this).micPassthroughEnabled()
             ContainerManager.start(this, cfg, mic)
-            // Give proot a beat to come up before we ask XFCE to install /
-            // vncserver to launch.
             Thread {
                 try { Thread.sleep(800) } catch (_: Throwable) {}
                 runOnUiThread {
@@ -163,15 +177,12 @@ class MainActivity : AppCompatActivity() {
             context = this,
             config = cfg,
             onConnected = {
-                runOnUiThread {
-                    TerminalBus.appendLine("[vnc] 已连接，渲染桌面中。")
-                }
+                runOnUiThread { TerminalBus.appendLine("[vnc] 已连接，渲染桌面中。") }
             },
             onDisconnected = { reason ->
                 runOnUiThread {
                     TerminalBus.appendLine("[vnc] ${reason ?: "断开"}", true)
                     closeVnc()
-                    switchTo(terminal)
                     Toast.makeText(this, R.string.msg_vnc_disconnected, Toast.LENGTH_SHORT).show()
                 }
             }
@@ -184,23 +195,36 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.msg_no_port_available, Toast.LENGTH_LONG).show()
             return
         }
-        // Surface the allocated port to the user.
         AlertDialog.Builder(this)
             .setTitle(R.string.title_port_allocated)
             .setMessage("当前 VNC 端口: ${session.port}\nVNC 密码: ${cfg.vncPassword}")
             .setPositiveButton(R.string.ok) { d, _ -> d.dismiss() }
-            .setOnDismissListener {
-                // After acknowledging, show the VNC surface.
-                switchTo(VncFragment())
-            }
+            .setOnDismissListener { showVncOverlay() }
             .show()
+    }
+
+    private fun showVncOverlay() {
+        val frag = VncFragment()
+        vncFragment = frag
+        supportFragmentManager.beginTransaction()
+            .setCustomAnimations(
+                androidx.appcompat.R.anim.abc_fade_in,
+                androidx.appcompat.R.anim.abc_fade_out
+            )
+            .replace(R.id.vnc_container, frag, "vnc")
+            .commitAllowingStateLoss()
     }
 
     fun closeVnc() {
         VncHost.session?.stop()
         VncHost.session = null
-        // Pop the VNC fragment and go back to the terminal.
-        if (current is VncFragment) switchTo(terminal)
+        val frag = vncFragment
+        if (frag != null) {
+            supportFragmentManager.beginTransaction()
+                .remove(frag)
+                .commitAllowingStateLoss()
+        }
+        vncFragment = null
     }
 
     // ---------------- battery + first-launch image ----------------
@@ -243,7 +267,7 @@ class MainActivity : AppCompatActivity() {
             val r = installer.installFromUrl(url, rootfs, cache) { dl, total ->
                 if (total > 0) {
                     val pct = (dl * 100 / total).toInt()
-                    TerminalBus.appendLine("\r[image] 下载 $pct% (${dl / 1024}KiB)", false)
+                    TerminalBus.appendLine("[image] 下载 $pct% (${dl / 1024}KiB)", false)
                 }
             }
             withContext(Dispatchers.Main) {
@@ -264,7 +288,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle(R.string.title_error)
             .setMessage(R.string.msg_download_image_failed)
-            .setPositiveButton(R.string.ok) { _, _ -> switchTo(settings) }
+            .setPositiveButton(R.string.ok) { _, _ -> selectPage(1) }
             .setNegativeButton(R.string.cancel, null)
             .show()
     }
@@ -276,8 +300,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PermissionHelper.REQ_STORAGE) {
-            val ok = grantResults.isNotEmpty() && grantResults.all { it == 0 }
-            if (!ok) {
+            if (!PermissionHelper.hasStorage(this)) {
                 Toast.makeText(this, R.string.msg_permission_storage_denied, Toast.LENGTH_LONG).show()
             }
         }

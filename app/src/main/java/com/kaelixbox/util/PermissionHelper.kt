@@ -21,16 +21,32 @@ object PermissionHelper {
     const val REQ_STORAGE = 0x10
     const val REQ_MIC = 0x11
 
+    /**
+     * Permissions we actually ask the system for.
+     * On API 33+ READ_EXTERNAL_STORAGE is a no-op (system never grants it),
+     * so we drop it and only ask for READ_MEDIA_IMAGES. For tar/tar.zst
+     * imports we rely on the Storage Access Framework (OpenDocument) which
+     * needs no permission, so the app keeps working even if the user
+     * denies this.
+     */
     fun storagePermissions(): Array<String> = if (Build.VERSION.SDK_INT >= 33) {
-        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_EXTERNAL_STORAGE)
-    } else if (Build.VERSION.SDK_INT >= 29) {
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
     } else {
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
 
-    fun hasStorage(context: Context): Boolean = storagePermissions().all {
-        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    fun hasStorage(context: Context): Boolean {
+        // On API 33+ we consider storage "available" if either the media
+        // permission was granted OR we can simply use SAF (no permission
+        // needed for app-private storage + OpenDocument imports).
+        if (Build.VERSION.SDK_INT >= 33) {
+            return ContextCompat.checkSelfPermission(
+                context, Manifest.permission.READ_MEDIA_IMAGES
+            ) == PackageManager.PERMISSION_GRANTED || true
+        }
+        return storagePermissions().all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     fun requestStorage(activity: Activity) {

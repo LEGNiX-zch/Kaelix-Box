@@ -8,11 +8,13 @@
 
     <ImageView
         android:id="@+id/avatar"
-        android:layout_width="96dp"
-        android:layout_height="96dp"
-        android:background="@drawable/bg_action_icon_circle"
+        android:layout_width="112dp"
+        android:layout_height="112dp"
+        android:background="@drawable/bg_avatar"
         android:contentDescription="@string/about_avatar_hint"
-        android:padding="8dp"
+        android:clipToOutline="true"
+        android:padding="20dp"
+        android:scaleType="fitCenter"
         android:src="@drawable/ic_nav_about"
         android:tint="#FFFFFFFF" />
 

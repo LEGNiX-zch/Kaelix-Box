@@ -79,8 +79,10 @@ class AboutFragment : Fragment() {
             } catch (_: Throwable) { null }
         } else null
         if (bmp != null) {
+            b.avatar.imageTintList = null
             b.avatar.setImageBitmap(bmp)
         } else {
+            b.avatar.imageTintList = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
             b.avatar.setImageResource(R.drawable.ic_nav_about)
         }
     }
