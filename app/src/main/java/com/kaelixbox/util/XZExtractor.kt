@@ -1,6 +1,5 @@
 package com.kaelixbox.util
 
-import com.github.luben.zstd.ZstdInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.tukaani.xz.XZInputStream
@@ -11,13 +10,13 @@ import java.io.IOException
 import java.io.InputStream
 
 /**
- * 流式解压 + 提取 `.tar.xz` / `.tar.zst` / `.tar`。
+ * 流式解压 + 提取 `.tar.xz`（以及纯 `.tar`）。
  *
- * 默认 Debian13 镜像为 tar.xz（xz 压缩），32 位设备本地导入支持 tar.zst。
- * 通过压缩包头部魔数自动识别格式，流式逐块写入磁盘，不将整个压缩包载入内存。
+ * 用于默认在线镜像 debian-xfce.tar.xz 的解压，以及本地导入的 tar.xz 镜像。
+ * 流式逐块写入磁盘，不将整个压缩包载入内存。
  * ENOSPC 等 IO 异常返回 DiskFull 而非 Corrupt，避免日志刷屏。
  */
-object ArchiveExtractor {
+object XZExtractor {
 
     sealed class Result {
         object Ok : Result()
@@ -43,35 +42,26 @@ object ArchiveExtractor {
             return Result.Failed("open archive: ${e.message ?: "io error"}")
         }
 
-        // 读取头部识别压缩格式：
-        //   XZ : FD 37 7A 58 5A 00
-        //   Zst: 28 B5 2F FD
-        // 都不匹配则按纯 tar 处理。
+        // 检测 xz 魔数 FD 37 7A 58 5A 00，存在则用 XZInputStream，否则按纯 tar 处理。
         val pushedBack = PushbackStream(raw, 8)
         val head = ByteArray(6)
         val n = pushedBack.read(head)
         if (n > 0) pushedBack.unread(head, 0, n)
 
-        val isXz = n >= 6 &&
-            (head[0].toInt() and 0xFF) == 0xFD &&
-            (head[1].toInt() and 0xFF) == 0x37 &&
-            (head[2].toInt() and 0xFF) == 0x7A &&
-            (head[3].toInt() and 0xFF) == 0x58 &&
-            (head[4].toInt() and 0xFF) == 0x5A &&
-            (head[5].toInt() and 0xFF) == 0x00
-        val isZst = n >= 4 &&
-            (head[0].toInt() and 0xFF) == 0x28 &&
-            (head[1].toInt() and 0xFF) == 0xB5 &&
-            (head[2].toInt() and 0xFF) == 0x2F &&
-            (head[3].toInt() and 0xFF) == 0xFD
-
         val tarStream: TarArchiveInputStream = try {
-            val decompressed: InputStream = when {
-                isXz -> XZInputStream(pushedBack)
-                isZst -> ZstdInputStream(pushedBack)
-                else -> pushedBack
+            val maybeXz: InputStream = if (n >= 6 &&
+                (head[0].toInt() and 0xFF) == 0xFD &&
+                (head[1].toInt() and 0xFF) == 0x37 &&
+                (head[2].toInt() and 0xFF) == 0x7A &&
+                (head[3].toInt() and 0xFF) == 0x58 &&
+                (head[4].toInt() and 0xFF) == 0x5A &&
+                (head[5].toInt() and 0xFF) == 0x00
+            ) {
+                XZInputStream(pushedBack)
+            } else {
+                pushedBack
             }
-            TarArchiveInputStream(decompressed, BUF, "UTF-8")
+            TarArchiveInputStream(maybeXz, BUF, "UTF-8")
         } catch (e: Exception) {
             return Result.Corrupt("invalid archive header: ${e.message ?: "unknown"}")
         }
