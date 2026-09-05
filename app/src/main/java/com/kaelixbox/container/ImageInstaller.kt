@@ -1,9 +1,9 @@
 package com.kaelixbox.container
 
 import android.content.Context
+import com.kaelixbox.util.ArchiveExtractor
 import com.kaelixbox.util.DiskSpace
 import com.kaelixbox.util.FileUtils
-import com.kaelixbox.util.ZstdExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -85,7 +85,7 @@ class ImageInstaller(
         }
     }
 
-    /** 解压用户导入的本地 tar / tar.zst 到 rootfs 目录。 */
+    /** 解压用户导入的本地 tar.xz / tar.zst / tar 到 rootfs 目录。 */
     suspend fun installFromFile(
         archive: File,
         destRootfs: File
@@ -106,20 +106,20 @@ class ImageInstaller(
         }
         log("开始流式解压 ${archive.name} → ${destRootfs.name} …", false)
         var lastEntry = ""
-        val r = ZstdExtractor.extract(archive, destRootfs) { name, _ ->
+        val r = ArchiveExtractor.extract(archive, destRootfs) { name, _ ->
             lastEntry = name
         }
         return when (r) {
-            ZstdExtractor.Result.Ok -> {
+            ArchiveExtractor.Result.Ok -> {
                 log("解压完成，最后一项: $lastEntry", false)
                 Result.Ok
             }
-            is ZstdExtractor.Result.DiskFull -> Result.DiskFull(r.required, r.available)
-            is ZstdExtractor.Result.Corrupt -> {
+            is ArchiveExtractor.Result.DiskFull -> Result.DiskFull(r.required, r.available)
+            is ArchiveExtractor.Result.Corrupt -> {
                 log("镜像损坏或格式不支持: ${r.reason}", true)
                 Result.Corrupt(r.reason)
             }
-            is ZstdExtractor.Result.Failed -> Result.Failed(r.reason)
+            is ArchiveExtractor.Result.Failed -> Result.Failed(r.reason)
         }
     }
 

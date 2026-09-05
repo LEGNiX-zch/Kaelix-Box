@@ -8,7 +8,7 @@ package com.kaelixbox.container
  */
 object ImageConfig {
 
-    const val IMAGE_FILENAME = "debian-trixie-arm64-minimal.tar.zst"
+    const val IMAGE_FILENAME = "debian-trixie-arm64-minimal.tar.xz"
 
     /** aka.ms 加速节点（默认镜像地址）。 */
     const val AKAMS_MIRROR_URL = "https://aka.ms/kaelix-debian13"

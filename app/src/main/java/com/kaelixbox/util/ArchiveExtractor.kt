@@ -3,6 +3,7 @@ package com.kaelixbox.util
 import com.github.luben.zstd.ZstdInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.tukaani.xz.XZInputStream
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -10,15 +11,13 @@ import java.io.IOException
 import java.io.InputStream
 
 /**
- * Streaming decompression + extraction of `.tar.zst` (and plain `.tar`).
+ * 流式解压 + 提取 `.tar.xz` / `.tar.zst` / `.tar`。
  *
- * Hard requirement: never load the whole compressed file into memory — we
- * stream chunk-by-chunk through zstd-jni's [ZstdInputStream] straight into
- * commons-compress's [TarArchiveInputStream], writing each entry to disk.
- * OOM / corruption exceptions are caught and surfaced to the caller; the
- * caller must report them on the terminal instead of crashing the app.
+ * 默认 Debian13 镜像为 tar.xz（xz 压缩），32 位设备本地导入支持 tar.zst。
+ * 通过压缩包头部魔数自动识别格式，流式逐块写入磁盘，不将整个压缩包载入内存。
+ * ENOSPC 等 IO 异常返回 DiskFull 而非 Corrupt，避免日志刷屏。
  */
-object ZstdExtractor {
+object ArchiveExtractor {
 
     sealed class Result {
         object Ok : Result()
@@ -44,24 +43,35 @@ object ZstdExtractor {
             return Result.Failed("open archive: ${e.message ?: "io error"}")
         }
 
-        // Detect zstd magic 28 b5 2f fd. If present, wrap; else treat as plain tar.
+        // 读取头部识别压缩格式：
+        //   XZ : FD 37 7A 58 5A 00
+        //   Zst: 28 B5 2F FD
+        // 都不匹配则按纯 tar 处理。
         val pushedBack = PushbackStream(raw, 8)
-        val head = ByteArray(4)
+        val head = ByteArray(6)
         val n = pushedBack.read(head)
         if (n > 0) pushedBack.unread(head, 0, n)
 
+        val isXz = n >= 6 &&
+            (head[0].toInt() and 0xFF) == 0xFD &&
+            (head[1].toInt() and 0xFF) == 0x37 &&
+            (head[2].toInt() and 0xFF) == 0x7A &&
+            (head[3].toInt() and 0xFF) == 0x58 &&
+            (head[4].toInt() and 0xFF) == 0x5A &&
+            (head[5].toInt() and 0xFF) == 0x00
+        val isZst = n >= 4 &&
+            (head[0].toInt() and 0xFF) == 0x28 &&
+            (head[1].toInt() and 0xFF) == 0xB5 &&
+            (head[2].toInt() and 0xFF) == 0x2F &&
+            (head[3].toInt() and 0xFF) == 0xFD
+
         val tarStream: TarArchiveInputStream = try {
-            val maybeZstd: InputStream = if (n >= 4 &&
-                (head[0].toInt() and 0xFF) == 0x28 &&
-                (head[1].toInt() and 0xFF) == 0xB5 &&
-                (head[2].toInt() and 0xFF) == 0x2F &&
-                (head[3].toInt() and 0xFF) == 0xFD
-            ) {
-                ZstdInputStream(pushedBack)
-            } else {
-                pushedBack
+            val decompressed: InputStream = when {
+                isXz -> XZInputStream(pushedBack)
+                isZst -> ZstdInputStream(pushedBack)
+                else -> pushedBack
             }
-            TarArchiveInputStream(maybeZstd, BUF, "UTF-8")
+            TarArchiveInputStream(decompressed, BUF, "UTF-8")
         } catch (e: Exception) {
             return Result.Corrupt("invalid archive header: ${e.message ?: "unknown"}")
         }
@@ -72,7 +82,6 @@ object ZstdExtractor {
             while (entry != null) {
                 val name = entry.name
                 if (name.contains("..") || name.startsWith("/")) {
-                    // skip path-traversal / absolute entries for safety
                     entry = tarStream.nextTarEntry
                     continue
                 }
@@ -88,12 +97,9 @@ object ZstdExtractor {
                     target.mkdirs()
                 } else {
                     target.parentFile?.mkdirs()
-                    // Devices / symlinks: skip content; on Android fs symlinks are
-                    // supported, but we only persist regular files here.
                     if (entry.isSymbolicLink || entry.isLink) {
                         try {
-                            val os = OsSymlink.link(target, entry.linkName)
-                            // no content body for links
+                            OsSymlink.link(target, entry.linkName)
                         } catch (_: Throwable) { /* ignore link failures */ }
                     } else {
                         target.outputStream().use { out ->
@@ -139,7 +145,7 @@ object ZstdExtractor {
     private class PushbackStream(src: InputStream, size: Int) :
         java.io.PushbackInputStream(src, size)
 
-    /** Minimal symlink helper — falls back to creating an empty file when link() unavailable. */
+    /** 符号链接辅助：不可用时回退为空文件，不中断解压。 */
     private object OsSymlink {
         fun link(target: File, linkName: String) {
             try {
@@ -152,9 +158,6 @@ object ZstdExtractor {
                     // fall through
                 }
             } catch (_: Throwable) { }
-            // Best-effort fallback: copy linkName as a plain file is wrong; instead
-            // create an empty regular file so tar extraction can proceed without
-            // aborting the whole rootfs.
             target.createNewFile()
         }
     }

@@ -19,7 +19,7 @@
     <string name="settings_mic_summary">默认关闭。开启后向 proot 追加音频透传参数，需要重启容器生效。</string>
     <string name="settings_battery_title">设置无限制省电（忽略电池优化）</string>
     <string name="settings_battery_summary">跳转系统电池优化设置，把本应用设为无限制，避免后台杀死 proot。</string>
-    <string name="settings_import_image">导入本地 tar / tar.zst 镜像</string>
+    <string name="settings_import_image">导入本地 tar.xz / tar.zst 镜像</string>
     <string name="settings_container_list">容器列表</string>
     <string name="settings_delete_container">删除容器</string>
     <string name="settings_switch_container">切换为当前容器</string>
@@ -44,7 +44,7 @@
     <string name="ext_keyboard_title">扩展键盘</string>
     <string name="zoom_title">缩放</string>
 
-    <string name="msg_download_image_failed">镜像下载失败，可手动选择本地 tar / tar.zst 镜像导入。</string>
+    <string name="msg_download_image_failed">镜像下载失败，可手动选择本地 tar.xz / tar.zst 镜像导入。</string>
     <string name="msg_disk_full">应用私有存储空间不足，已拒绝解压。</string>
     <string name="msg_disk_full_detail">应用私有存储空间不足。需要约 %1$dMiB，当前可用 %2$dMiB。请清理应用数据或卸载不必要应用后重试。</string>
     <string name="msg_image_corrupt">镜像损坏或格式不支持。</string>

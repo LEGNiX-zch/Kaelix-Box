@@ -42,12 +42,10 @@ app/release/
 
 # Do not commit local container images / rootfs
 # 镜像托管在 GitHub Releases，禁止提交进源码仓库
-*.tar
-*.tar.zst
-*.tar.gz
 *.tar.xz
-rootfs/
+*.tar.zst
 *.sha256
+rootfs/
 
 # Build artifact: proot is downloaded at build time from the top-level
 # /proot file via the downloadProot Gradle task. Do not commit this copy.
