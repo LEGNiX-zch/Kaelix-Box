@@ -12,8 +12,7 @@
         android:layout_height="280dp"
         android:adjustViewBounds="true"
         android:contentDescription="@string/about_donate_title"
-        android:scaleType="fitCenter"
-        android:src="@drawable/donate_qr" />
+        android:scaleType="fitCenter" />
 
     <TextView
         android:layout_width="wrap_content"

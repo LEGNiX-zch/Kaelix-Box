@@ -53,6 +53,31 @@ class AboutFragment : Fragment() {
         }
     }
 
+    private val pickDonate = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        val target = FileUtils.donateImageTarget(requireContext())
+        (requireActivity().application as App).appScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    requireContext().contentResolver.openInputStream(uri).use { input ->
+                        if (input == null) return@withContext
+                        target.outputStream().use { out ->
+                            FileUtils.copyTo(input, out)
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(requireContext(),
+                            "赞赏码读取失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            withContext(Dispatchers.Main) { showDonateDialog() }
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -75,7 +100,24 @@ class AboutFragment : Fragment() {
     }
 
     private fun showDonateDialog() {
+        val target = FileUtils.donateImageTarget(requireContext())
+        val bmp = if (target.exists()) {
+            try { BitmapFactory.decodeFile(target.absolutePath) } catch (_: Throwable) { null }
+        } else null
+
+        if (bmp == null) {
+            // No donate image saved yet — ask the user to pick one.
+            AlertDialog.Builder(requireContext())
+                .setTitle(R.string.about_donate_title)
+                .setMessage("请先选择一张赞赏码图片。")
+                .setPositiveButton("选择图片") { _, _ -> pickDonate.launch(arrayOf("image/*")) }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+            return
+        }
+
         val db = DialogDonateBinding.inflate(layoutInflater)
+        db.donateImage.setImageBitmap(bmp)
         AlertDialog.Builder(requireContext())
             .setTitle(R.string.about_donate_title)
             .setView(db.root)
