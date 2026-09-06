@@ -49,17 +49,25 @@ class ImageInstaller(
         cache: File,
         onProgress: (downloaded: Long, total: Long) -> Unit,
         onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null,
-        onStage: ((String) -> Unit)? = null
+        onStage: ((String) -> Unit)? = null,
+        onExtractEntry: ((String) -> Unit)? = null
     ): Result = withContext(Dispatchers.IO) {
         cache.parentFile?.mkdirs()
         FileUtils.cleanDownloadCache(context)
+        onStage?.invoke("download")
         try {
-            // 1. 先尝试加速镜像
+            // 1. 先尝试加速镜像；下载完成后校验文件魔数，
+            //    若不是有效 xz（例如短链失效返回了 HTML 错误页），则视为下载失败并回退。
             var res = downloadResumable(mirrorUrl, cache, onProgress)
-            if (res !is Result.Ok) {
-                log("加速镜像下载失败(${(res as? Result.Network)?.reason ?: res.javaClass.simpleName})，回退 GitHub 直连…", false)
+            if (res !is Result.Ok || !isValidXzArchive(cache)) {
+                log("加速镜像下载失败或内容无效(${(res as? Result.Network)?.reason ?: res.javaClass.simpleName})，回退 GitHub 直连…", true)
                 cache.delete()
                 res = downloadResumable(fallbackUrl, cache, onProgress)
+                if (res is Result.Ok && !isValidXzArchive(cache)) {
+                    log("GitHub 直连下载内容无效，可能镜像已损坏", true)
+                    cache.delete()
+                    return@withContext Result.Corrupt("invalid archive content")
+                }
             }
             if (res !is Result.Ok) {
                 cache.delete()
@@ -80,7 +88,7 @@ class ImageInstaller(
 
             // 3. 解压
             onStage?.invoke("extract")
-            val extractRes = extractTo(destRootfs, cache, onExtractProgress)
+            val extractRes = extractTo(destRootfs, cache, onExtractProgress, onExtractEntry)
             cache.delete()
             extractRes
         } catch (e: Throwable) {
@@ -90,14 +98,37 @@ class ImageInstaller(
         }
     }
 
+    /**
+     * 校验下载文件是否为有效的 xz 压缩包（魔数 FD 37 7A 58 5A 00）。
+     * 用于在 SHA256 校验之前快速拦截短链失效导致的 HTML 错误页等无效内容。
+     */
+    private fun isValidXzArchive(file: File): Boolean {
+        return try {
+            java.io.FileInputStream(file).use { fis ->
+                val head = ByteArray(6)
+                val n = fis.read(head)
+                n >= 6 &&
+                    (head[0].toInt() and 0xFF) == 0xFD &&
+                    (head[1].toInt() and 0xFF) == 0x37 &&
+                    (head[2].toInt() and 0xFF) == 0x7A &&
+                    (head[3].toInt() and 0xFF) == 0x58 &&
+                    (head[4].toInt() and 0xFF) == 0x5A &&
+                    (head[5].toInt() and 0xFF) == 0x00
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     /** 解压用户导入的本地 tar.xz / tar.zst / tar 到 rootfs 目录。 */
     suspend fun installFromFile(
         archive: File,
         destRootfs: File,
-        onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null
+        onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null,
+        onExtractEntry: ((String) -> Unit)? = null
     ): Result = withContext(Dispatchers.IO) {
         FileUtils.cleanDownloadCache(context)
-        val res = extractLocal(destRootfs, archive, onExtractProgress)
+        val res = extractLocal(destRootfs, archive, onExtractProgress, onExtractEntry)
         archive.delete()
         res
     }
@@ -106,7 +137,8 @@ class ImageInstaller(
     private fun extractTo(
         destRootfs: File,
         archive: File,
-        onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null
+        onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null,
+        onExtractEntry: ((String) -> Unit)? = null
     ): Result {
         destRootfs.mkdirs()
         val required = DiskSpace.estimateDecompressedRequired(archive.length())
@@ -118,7 +150,10 @@ class ImageInstaller(
         log("开始流式解压 ${archive.name} → ${destRootfs.name} …", false)
         var lastEntry = ""
         val r = XZExtractor.extract(archive, destRootfs,
-            onEntry = { name, _ -> lastEntry = name },
+            onEntry = { name, _ ->
+                lastEntry = name
+                onExtractEntry?.invoke(name)
+            },
             onProgress = onExtractProgress
         )
         return mapResult(r, lastEntry)
@@ -133,7 +168,8 @@ class ImageInstaller(
     private fun extractLocal(
         destRootfs: File,
         archive: File,
-        onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null
+        onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null,
+        onExtractEntry: ((String) -> Unit)? = null
     ): Result {
         destRootfs.mkdirs()
         val required = DiskSpace.estimateDecompressedRequired(archive.length())
@@ -147,12 +183,18 @@ class ImageInstaller(
         var lastEntry = ""
         val r = if (isZst) {
             ZstdExtractor.extract(archive, destRootfs,
-                onEntry = { name, _ -> lastEntry = name },
+                onEntry = { name, _ ->
+                    lastEntry = name
+                    onExtractEntry?.invoke(name)
+                },
                 onProgress = onExtractProgress
             )
         } else {
             XZExtractor.extract(archive, destRootfs,
-                onEntry = { name, _ -> lastEntry = name },
+                onEntry = { name, _ ->
+                    lastEntry = name
+                    onExtractEntry?.invoke(name)
+                },
                 onProgress = onExtractProgress
             )
         }
@@ -226,7 +268,9 @@ class ImageInstaller(
             }
             val total = (conn.contentLengthLong.takeIf { it > 0 } ?: -1L)
                 .let { if (existing > 0 && it > 0) it + existing else it }
-            val append = (code == 206 || existing > 0) && existing > 0
+            // 仅当服务器返回 206 Partial Content 时才续传追加；
+            // 200 表示服务器返回完整内容，此时必须覆盖写入，否则会拼接到旧文件后面导致损坏。
+            val append = code == 206
             log("下载 ${url.substringAfterLast('/')} (已存在 $existing 字节, 续传=$append)", false)
             FileOutputStream(cache, append).use { out ->
                 conn.inputStream.use { input ->

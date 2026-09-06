@@ -46,7 +46,7 @@ class DownloadActivity : AppCompatActivity() {
     private val pickFile = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) startImport(uri) else finish()
+        if (uri != null) startImport(uri) else finishBackToChoice()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,7 +56,7 @@ class DownloadActivity : AppCompatActivity() {
 
         mode = intent.getIntExtra(EXTRA_MODE, MODE_DOWNLOAD)
 
-        b.btnCancel.setOnClickListener { finish() }
+        b.btnCancel.setOnClickListener { finishBackToChoice() }
         b.btnRetry.setOnClickListener { startTask() }
         b.btnEnter.setOnClickListener { enterMain() }
 
@@ -79,6 +79,7 @@ class DownloadActivity : AppCompatActivity() {
         b.btnEnter.visibility = View.GONE
         b.btnCancel.visibility = View.VISIBLE
         b.btnCancel.isEnabled = true
+        b.logScroll.visibility = View.GONE
         lockButtons(true)
 
         val prefs = AppPrefs.get(this)
@@ -92,7 +93,10 @@ class DownloadActivity : AppCompatActivity() {
         )
         val cache = File(FileUtils.downloadCacheDir(this), ImageConfig.IMAGE_FILENAME)
         val rootfs = FileUtils.rootfsDir(this, cfg.id)
-        val installer = ImageInstaller(this) { msg, err -> TerminalBus.appendLine(msg, err) }
+        val installer = ImageInstaller(this) { msg, err ->
+            TerminalBus.appendLine(msg, err)
+            appendLog(msg)
+        }
 
         // 速度计算
         var lastBytes = 0L
@@ -119,6 +123,9 @@ class DownloadActivity : AppCompatActivity() {
                 },
                 onStage = { stage ->
                     runOnUiThread { setStage(stage) }
+                },
+                onExtractEntry = { name ->
+                    runOnUiThread { appendLog("正在解压: $name") }
                 }
             )
             withContext(Dispatchers.Main) { handleResult(r, cfg, true) }
@@ -132,6 +139,7 @@ class DownloadActivity : AppCompatActivity() {
         b.btnEnter.visibility = View.GONE
         b.btnCancel.visibility = View.VISIBLE
         b.btnCancel.isEnabled = true
+        b.logScroll.visibility = View.VISIBLE
         lockButtons(true)
         setStage("extract")
 
@@ -146,27 +154,42 @@ class DownloadActivity : AppCompatActivity() {
         )
         val cache = File(FileUtils.downloadCacheDir(this), "$targetName.archive")
         val rootfs = FileUtils.rootfsDir(this, cfg.id)
-        val installer = ImageInstaller(this) { msg, err -> TerminalBus.appendLine(msg, err) }
+        val installer = ImageInstaller(this) { msg, err ->
+            TerminalBus.appendLine(msg, err)
+            appendLog(msg)
+        }
 
         job = scope.launch {
+            appendLog("正在读取本地镜像文件…")
             val archive = withContext(Dispatchers.IO) {
                 try {
                     contentResolver.openInputStream(uri).use { input ->
                         if (input == null) return@withContext null
                         cache.outputStream().use { out ->
-                            FileUtils.copyTo(input, out)
+                            FileUtils.copyTo(input, out) { copied ->
+                                runOnUiThread {
+                                    appendLog("已读取 ${formatSize(copied)}")
+                                }
+                            }
                         }
                     }
                     cache
                 } catch (e: Exception) {
                     TerminalBus.appendLine("导入读取失败: ${e.message}", true)
+                    appendLog("导入读取失败: ${e.message}")
                     null
                 }
             } ?: return@launch
 
-            val r = installer.installFromFile(archive, rootfs) { processed, total ->
-                runOnUiThread { updateExtract(processed, total) }
-            }
+            appendLog("读取完成，开始解压…")
+            val r = installer.installFromFile(archive, rootfs,
+                onExtractProgress = { processed, total ->
+                    runOnUiThread { updateExtract(processed, total) }
+                },
+                onExtractEntry = { name ->
+                    runOnUiThread { appendLog("正在解压: $name") }
+                }
+            )
             withContext(Dispatchers.Main) { handleResult(r, cfg, false) }
         }
     }
@@ -180,12 +203,14 @@ class DownloadActivity : AppCompatActivity() {
                 b.progressBar.isIndeterminate = false
                 b.progressSpinner.visibility = View.GONE
                 b.progressBar.visibility = View.VISIBLE
+                b.logScroll.visibility = View.GONE
             }
             "verify" -> {
                 b.stageText.setText(R.string.stage_verify)
                 b.progressBar.isIndeterminate = true
                 b.speedText.visibility = View.GONE
                 b.sizeText.visibility = View.GONE
+                b.logScroll.visibility = View.GONE
             }
             "extract" -> {
                 b.stageText.setText(R.string.stage_extract)
@@ -193,8 +218,20 @@ class DownloadActivity : AppCompatActivity() {
                 b.progressBar.progress = 0
                 b.speedText.visibility = View.GONE
                 b.sizeText.visibility = View.GONE
+                b.logScroll.visibility = View.VISIBLE
             }
         }
+    }
+
+    /** 追加一行日志到进度页底部的滚动日志区，并自动滚动到底部。 */
+    private fun appendLog(msg: String) {
+        val current = b.logText.text?.toString() ?: ""
+        val next = if (current.isEmpty()) msg else "$current\n$msg"
+        // 限制日志行数，避免内存无限增长
+        val lines = next.lines()
+        val trimmed = if (lines.size > 200) lines.takeLast(200).joinToString("\n") else next
+        b.logText.text = trimmed
+        b.logScroll.post { b.logScroll.fullScroll(View.FOCUS_DOWN) }
     }
 
     private fun updateDownload(downloaded: Long, total: Long, speedBytesPerSec: Double) {
@@ -251,25 +288,31 @@ class DownloadActivity : AppCompatActivity() {
                         .setTitle(R.string.title_error)
                         .setMessage(R.string.msg_sha256_failed)
                         .setPositiveButton(R.string.btn_retry) { _, _ -> startTask() }
-                        .setNegativeButton(R.string.cancel) { _, _ -> finish() }
+                        .setNegativeButton(R.string.cancel) { _, _ -> finishBackToChoice() }
                         .showAnimated()
                 } else {
                     AlertDialog.Builder(this)
                         .setTitle(R.string.title_error)
-                        .setMessage(R.string.msg_image_corrupt)
-                        .setPositiveButton(R.string.ok) { _, _ -> finish() }
+                        .setMessage(
+                            if (isDownload) R.string.msg_image_corrupt
+                            else R.string.msg_import_image_failed
+                        )
+                        .setPositiveButton(R.string.ok) { _, _ -> finishBackToChoice() }
                         .showAnimated()
                 }
             }
             else -> {
                 AlertDialog.Builder(this)
                     .setTitle(R.string.title_error)
-                    .setMessage(R.string.msg_download_image_failed)
+                    .setMessage(
+                        if (isDownload) R.string.msg_download_image_failed
+                        else R.string.msg_import_image_failed
+                    )
                     .setPositiveButton(R.string.btn_retry) { _, _ ->
                         if (isDownload) startTask()
                         else pickFile.launch(arrayOf("*/*"))
                     }
-                    .setNegativeButton(R.string.cancel) { _, _ -> finish() }
+                    .setNegativeButton(R.string.cancel) { _, _ -> finishBackToChoice() }
                     .showAnimated()
             }
         }
@@ -281,8 +324,17 @@ class DownloadActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle(R.string.title_error)
             .setMessage(getString(R.string.msg_disk_full_detail, reqMiB, availMiB))
-            .setPositiveButton(R.string.ok) { _, _ -> finish() }
+            .setPositiveButton(R.string.ok) { _, _ -> finishBackToChoice() }
             .showAnimated()
+    }
+
+    /**
+     * 返回启动页并告知「需要重新弹出镜像来源选择对话框」。
+     * 避免用户点取消后卡死在 K 启动页无法操作。
+     */
+    private fun finishBackToChoice() {
+        setResult(RESULT_CANCELED)
+        finish()
     }
 
     /**
@@ -316,7 +368,7 @@ class DownloadActivity : AppCompatActivity() {
     companion object {
         const val MODE_DOWNLOAD = 0
         const val MODE_IMPORT = 1
-        private const val EXTRA_MODE = "mode"
+        const val EXTRA_MODE = "mode"
 
         fun startForDownload(context: Context) {
             context.startActivity(Intent(context, DownloadActivity::class.java).apply {

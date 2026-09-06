@@ -7,9 +7,9 @@ import android.os.Build
 import android.os.Bundle
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.kaelixbox.container.ContainerManager
-import com.kaelixbox.container.ImageConfig
 import com.kaelixbox.prefs.AppPrefs
 
 /**
@@ -17,6 +17,20 @@ import com.kaelixbox.prefs.AppPrefs
  * 首次启动（无容器）弹出镜像来源选择对话框；已有容器则直接进入主页。
  */
 class SplashActivity : AppCompatActivity() {
+
+    /** 从 DownloadActivity 返回时接收结果；若用户取消且仍无容器，则重新弹出选择对话框。 */
+    private val downloadResult = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        // 无论结果如何，只要还没有安装镜像/容器，就重新弹出选择对话框，
+        // 避免用户取消后卡死在 K 启动页无法操作。
+        val prefs = AppPrefs.get(this)
+        if (!prefs.defaultImageInstalled() && ContainerManager.listContainers(this).isEmpty()) {
+            showImageChoiceDialog()
+        } else {
+            goMain()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,17 +73,23 @@ class SplashActivity : AppCompatActivity() {
 
         if (isArm64) {
             builder.setPositiveButton(R.string.splash_choose_download) { _, _ ->
-                DownloadActivity.startForDownload(this)
+                downloadResult.launch(Intent(this, DownloadActivity::class.java).apply {
+                    putExtra(DownloadActivity.EXTRA_MODE, DownloadActivity.MODE_DOWNLOAD)
+                })
                 overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
             }
             builder.setNegativeButton(R.string.splash_choose_import) { _, _ ->
-                DownloadActivity.startForImport(this)
+                downloadResult.launch(Intent(this, DownloadActivity::class.java).apply {
+                    putExtra(DownloadActivity.EXTRA_MODE, DownloadActivity.MODE_IMPORT)
+                })
                 overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
             }
         } else {
             // 32 位设备仅允许本地导入
             builder.setPositiveButton(R.string.splash_choose_import) { _, _ ->
-                DownloadActivity.startForImport(this)
+                downloadResult.launch(Intent(this, DownloadActivity::class.java).apply {
+                    putExtra(DownloadActivity.EXTRA_MODE, DownloadActivity.MODE_IMPORT)
+                })
                 overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
             }
         }
