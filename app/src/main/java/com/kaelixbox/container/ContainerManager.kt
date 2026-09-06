@@ -1,6 +1,8 @@
 package com.kaelixbox.container
 
 import android.content.Context
+import android.system.Os
+import android.system.OsConstants
 import com.kaelixbox.App
 import com.kaelixbox.prefs.AppPrefs
 import com.kaelixbox.util.FileUtils
@@ -9,6 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
+import java.io.FileDescriptor
 import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -106,37 +109,83 @@ object ContainerManager {
             TerminalBus.appendLine("[container] 请先在设置页下载/导入镜像。", true)
             return
         }
+
+        // ---- 预检 1：proot 二进制存在且可执行 ----
+        val prootBin = ProotManager.prootBinary(context)
+        if (!prootBin.exists() || prootBin.length() < 1024) {
+            TerminalBus.appendLine("[container] proot 二进制缺失，请重启应用自动释放。", true)
+            return
+        }
+        if (!prootBin.canExecute()) {
+            // 尝试修复可执行权限
+            FileUtils.ensureExecutable(prootBin)
+            if (!prootBin.canExecute()) {
+                TerminalBus.appendLine(
+                    "[container] proot 不可执行：${prootBin.absolutePath}\n" +
+                        "[container] 请检查存储是否挂载为 noexec，或重新安装 APK。",
+                    true
+                )
+                return
+            }
+        }
+
+        // ---- 预检 2：PTY 可用性（Android 13 SELinux 可能限制 devpts）----
+        val ptyErr = PtyHelper.checkAvailability()
+        val pty = if (ptyErr == null) PtyHelper.open() else null
+        if (pty == null && ptyErr != null) {
+            TerminalBus.appendLine("[container] PTY 不可用：$ptyErr", true)
+            TerminalBus.appendLine("[container] 将回退到管道模式（非交互，输出可能延迟）。", true)
+        }
+
         val (argv, _env) = ProotManager.build(context, cfg, micEnabled) { msg ->
             TerminalBus.appendLine(msg, true)
         }
         TerminalBus.appendLine(ProotManager.describe(cfg, micEnabled))
 
-        val pb = ProcessBuilder(argv).redirectErrorStream(true)
+        val pb = ProcessBuilder(argv)
         pb.directory(File(cfg.rootfs(context)))
         // proot needs PATH for some shims; pass a minimal env.
         pb.environment().clear()
         pb.environment()["PATH"] = "/system/bin:/system/xbin"
         pb.environment()["TMPDIR"] = context.cacheDir.absolutePath
 
-        // 尝试分配 pty，让 bash 以交互模式运行并恢复行缓冲输出。
-        // 失败则回退到管道模式（非交互，输出可能全缓冲）。
-        val pty = PtyHelper.open()
-        if (pty != null) {
-            val slave = File(pty.slavePath)
-            pb.redirectInput(slave)
-            pb.redirectOutput(slave)
-            pb.redirectError(slave)
-            TerminalBus.appendLine("[proot] 已分配 PTY，终端交互模式已启用。", false)
-        } else {
-            TerminalBus.appendLine("[proot] 未分配到 PTY，回退管道模式（输出可能延迟）。", true)
-        }
-
         val proc = try {
-            pb.start()
+            if (pty != null) {
+                // Android 13 SELinux 兼容：不能用 pb.redirectInput(slave)，
+                // 因为其内部会 open(/dev/pts/N) 被 untrusted_app 域拒绝。
+                // 改为在父进程中 dup2(slaveFd, 0/1/2)，子进程通过继承获得 slave FD。
+                pb.redirectInput(ProcessBuilder.Redirect.INHERIT)
+                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT)
+                pb.redirectError(ProcessBuilder.Redirect.INHERIT)
+                pb.redirectErrorStream(false)
+
+                val saved0 = Os.dup(FileDescriptor.`in`)
+                val saved1 = Os.dup(FileDescriptor.out)
+                val saved2 = Os.dup(FileDescriptor.err)
+                try {
+                    Os.dup2(pty.slaveFd, OsConstants.STDIN_FILENO)
+                    Os.dup2(pty.slaveFd, OsConstants.STDOUT_FILENO)
+                    Os.dup2(pty.slaveFd, OsConstants.STDERR_FILENO)
+                    pb.start()
+                } finally {
+                    // 立即恢复父进程自身的 stdin/stdout/stderr，避免影响后续日志输出
+                    Os.dup2(saved0, OsConstants.STDIN_FILENO)
+                    Os.dup2(saved1, OsConstants.STDOUT_FILENO)
+                    Os.dup2(saved2, OsConstants.STDERR_FILENO)
+                    runCatching { Os.close(saved0) }
+                    runCatching { Os.close(saved1) }
+                    runCatching { Os.close(saved2) }
+                }
+            } else {
+                // 管道模式：PTY 不可用时的回退
+                pb.redirectErrorStream(true)
+                pb.start()
+            }
         } catch (e: IOException) {
             pty?.close()
             TerminalBus.appendLine(
-                "[proot] 二进制执行失败: ${e.message}\n[proot] 请检查 SELinux/W^X 权限，或重新安装 APK。",
+                "[container] proot 启动失败: ${e.message}\n" +
+                    "[container] 请检查 SELinux/W^X 权限、proot 可执行位，或重新安装 APK。",
                 true
             )
             return
@@ -146,6 +195,10 @@ object ContainerManager {
         currentConfig = cfg
         running.set(true)
         onStateChanged?.invoke(true)
+
+        if (pty != null) {
+            TerminalBus.appendLine("[proot] 已分配 PTY（$pty.slavePath），终端交互模式已启用。", false)
+        }
 
         // stdout/stderr pump：有 pty 时从 master 读，否则从管道读。
         val out: InputStream = pty?.masterIn ?: proc.inputStream
