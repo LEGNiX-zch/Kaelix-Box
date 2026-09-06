@@ -48,6 +48,8 @@ app/release/
 rootfs/
 
 # Build artifact: proot is downloaded at build time from the top-level
-# /proot file via the downloadProot Gradle task. Do not commit this copy.
-app/src/main/assets/proot
+# /proot file via the downloadProot Gradle task, staged as a fake .so
+# under jniLibs so AGP packages it into lib/arm64-v8a/ (exec-permitted at
+# runtime, bypassing filesDir noexec on Android 13+). Do not commit this copy.
+app/src/main/jniLibs/arm64-v8a/libproot.so
 

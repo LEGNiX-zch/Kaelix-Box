@@ -34,14 +34,16 @@ class App : Application() {
         instance = this
         prefs = AppPrefs.get(this)
 
-        // First-start: extract the bundled proot out of assets into private
-        // storage and chmod +x. Runtime network download of proot is forbidden.
+        // proot is shipped as libproot.so inside jniLibs and lives under
+        // nativeLibraryDir at runtime — that path is exec-permitted by the
+        // system, so NO asset extraction / chmod is needed. Critically, proot
+        // must NOT be copied to filesDir, which is noexec on Android 13+ and
+        // would trigger SELinux EACCES on exec.
         appScope.launch {
             val bin = FileUtils.prootBin(this@App)
             if (!bin.exists() || bin.length() < 1024) {
-                FileUtils.copyAssetTo(this@App, "proot", bin)
+                android.util.Log.e("App", "proot native lib missing: ${bin.absolutePath}")
             }
-            FileUtils.ensureExecutable(bin)
             ProcessMonitor.markBootFlagIfKilled(this@App)
         }
 

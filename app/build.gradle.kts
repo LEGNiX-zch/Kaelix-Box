@@ -8,8 +8,14 @@ import java.util.zip.ZipFile
 // Build-time proot downloader task.
 // Requirement: proot must be fetched from the repo main branch and packaged
 // into the APK during the Gradle build. Runtime download is forbidden.
+// proot is staged as a fake shared library (libproot.so) under jniLibs so
+// AGP packages it into lib/arm64-v8a/ of the APK. At runtime the system
+// extracts it under nativeLibraryDir, which is exec-permitted — this is
+// what lets proot run on Android 13+ where filesDir is noexec and SELinux
+// blocks executing arbitrary binaries out of app private storage. Same
+// trick Termux / tiny_computer use.
 // If the network download fails AND there is no usable committed copy in
-// assets, the build must terminate (no silent skip).
+// jniLibs, the build must terminate (no silent skip).
 
 val PROOT_URL = "https://raw.githubusercontent.com/LEGNiX-zch/Kaelix-Box/main/proot"
 
@@ -24,10 +30,10 @@ fun copyStream(input: InputStream, output: OutputStream) {
 }
 
 tasks.register("downloadProot") {
-    description = "Downloads the proot binary from the repo main branch into assets."
+    description = "Downloads proot as libproot.so into jniLibs so AGP packages it into lib/arm64-v8a/."
     group = "kaelix"
-    val out: File = project.file("src/main/assets/proot")
-    val tmp: File = File(out.parentFile, "proot.download")
+    val out: File = project.file("src/main/jniLibs/arm64-v8a/libproot.so")
+    val tmp: File = File(out.parentFile, "libproot.so.download")
     doLast {
         out.parentFile.mkdirs()
         try {

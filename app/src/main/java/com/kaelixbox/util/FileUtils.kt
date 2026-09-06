@@ -16,7 +16,19 @@ object FileUtils {
     fun prootDir(context: Context): File =
         File(appFilesRoot(context), "bin").apply { mkdirs() }
 
-    fun prootBin(context: Context): File = File(prootDir(context), "proot")
+    /**
+     * proot 二进制路径。
+     *
+     * proot 不再从 assets 释放到 filesDir（filesDir 默认 noexec，Android 13+
+     * SELinux 会拒绝执行任意二进制）。改为以 libproot.so 名义打包进 jniLibs，
+     * 运行时直接使用 nativeLibraryDir 下的 .so 路径执行 —— 系统认可该路径
+     * 可执行，规避 W^X / noexec 限制（与 Termux、tiny_computer 等 rootless
+     * 方案一致）。
+     */
+    fun prootNativeLib(context: Context): File =
+        File(context.applicationInfo.nativeLibraryDir, "libproot.so")
+
+    fun prootBin(context: Context): File = prootNativeLib(context)
 
     fun containersRoot(context: Context): File =
         File(appFilesRoot(context), "containers").apply { mkdirs() }
