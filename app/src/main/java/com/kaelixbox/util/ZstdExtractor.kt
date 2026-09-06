@@ -34,6 +34,15 @@ object ZstdExtractor {
     private const val THROTTLE_EVERY = 50
     private const val THROTTLE_MS = 3L
 
+    /**
+     * 解压总大小无法提前获知。
+     * 以压缩包大小 × 估算倍数作为初始总量，实际写出超过 90% 时按 1.5 倍递增，
+     * 保证进度条持续平滑推进，不会因解压库内部缓冲而卡在某个百分比。
+     */
+    private const val INITIAL_RATIO = 4.0
+    private const val GROW_THRESHOLD = 0.9
+    private const val GROW_FACTOR = 1.5
+
     fun extract(
         archive: File,
         destDir: File,
@@ -43,15 +52,17 @@ object ZstdExtractor {
         if (!archive.exists()) return Result.Failed("archive missing: ${archive.absolutePath}")
         destDir.mkdirs()
 
-        val total = archive.length()
-        val required = DiskSpace.estimateDecompressedRequired(total)
+        val compressedSize = archive.length()
+        val required = DiskSpace.estimateDecompressedRequired(compressedSize)
         if (!DiskSpace.hasEnough(destDir, required)) {
             return Result.DiskFull(required, DiskSpace.availableBytes(destDir))
         }
 
-        val counter = CountingInputStream { read -> onProgress?.invoke(read, total) }
+        // 动态估算的解压后总大小，随写出字节增长而扩张
+        var estimatedTotal = (compressedSize * INITIAL_RATIO).toLong().coerceAtLeast(1L)
+
         val raw: InputStream = try {
-            BufferedInputStream(counter.wrap(FileInputStream(archive)), BUF)
+            BufferedInputStream(FileInputStream(archive), BUF)
         } catch (e: IOException) {
             return Result.Failed("open archive: ${e.message ?: "io error"}")
         }
@@ -79,6 +90,8 @@ object ZstdExtractor {
         }
 
         val buf = ByteArray(BUF)
+        // 累计已写出到磁盘的解压字节数，用于平滑进度
+        var writtenBytes = 0L
         return try {
             var entry: TarArchiveEntry? = tarStream.nextTarEntry
             var entryCount = 0
@@ -110,6 +123,12 @@ object ZstdExtractor {
                                 val r = tarStream.read(buf)
                                 if (r <= 0) break
                                 out.write(buf, 0, r)
+                                writtenBytes += r
+                                // 动态扩张估算总量，避免进度提前到顶后停滞
+                                if (writtenBytes > estimatedTotal * GROW_THRESHOLD) {
+                                    estimatedTotal = (estimatedTotal * GROW_FACTOR).toLong()
+                                }
+                                onProgress?.invoke(writtenBytes, estimatedTotal)
                             }
                         }
                         if (entry.mode and 0b001_000_000 != 0) {
@@ -126,6 +145,8 @@ object ZstdExtractor {
                 }
                 entry = tarStream.nextTarEntry
             }
+            // 解压完成，强制进度到 100%
+            onProgress?.invoke(estimatedTotal, estimatedTotal)
             Result.Ok
         } catch (e: OutOfMemoryError) {
             Result.Corrupt("out-of-memory during decompression: ${e.message ?: "oom"}")
@@ -153,25 +174,6 @@ object ZstdExtractor {
 
     private class PushbackStream(src: InputStream, size: Int) :
         java.io.PushbackInputStream(src, size)
-
-    /** 包装输入流，累计读取字节数并回调。用于解压进度估算（按压缩包已读比例）。 */
-    private class CountingInputStream(private val onRead: (Long) -> Unit) {
-        private var read = 0L
-        fun wrap(src: InputStream): InputStream = object : InputStream() {
-            override fun read(): Int {
-                val b = src.read()
-                if (b >= 0) { read++; onRead(read) }
-                return b
-            }
-            override fun read(b: ByteArray, off: Int, len: Int): Int {
-                val n = src.read(b, off, len)
-                if (n > 0) { read += n; onRead(read) }
-                return n
-            }
-            override fun available() = src.available()
-            override fun close() = src.close()
-        }
-    }
 
     /** 符号链接辅助：不可用时回退为空文件，不中断解压。 */
     private object OsSymlink {
