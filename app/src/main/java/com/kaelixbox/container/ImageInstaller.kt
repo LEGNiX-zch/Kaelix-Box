@@ -53,15 +53,34 @@ class ImageInstaller(
         onExtractEntry: ((String) -> Unit)? = null
     ): Result = withContext(Dispatchers.IO) {
         cache.parentFile?.mkdirs()
-        FileUtils.cleanDownloadCache(context)
         onStage?.invoke("download")
         try {
+            // 0. 检查本地是否已有完整缓存：若 SHA256 匹配则跳过下载直接解压。
+            //    这实现了「下载进度持久化」——进程被杀后重启可复用已下载文件。
+            if (cache.exists() && expectedSha256.isNotBlank()) {
+                val cachedSha = FileUtils.sha256File(cache)
+                if (cachedSha != null && cachedSha.equals(expectedSha256, ignoreCase = true)) {
+                    log("检测到本地已存在完整镜像缓存，跳过下载", false)
+                    onStage?.invoke("verify")
+                    log("SHA256 校验通过", false)
+                    onStage?.invoke("extract")
+                    val extractRes = extractTo(destRootfs, cache, onExtractProgress, onExtractEntry)
+                    cache.delete()
+                    return@withContext extractRes
+                }
+                log("本地缓存 SHA256 不匹配，将尝试续传下载", false)
+            }
+
             // 1. 先尝试加速镜像；下载完成后校验文件魔数，
             //    若不是有效 xz（例如短链失效返回了 HTML 错误页），则视为下载失败并回退。
+            //    注意：下载失败时不删除缓存文件，保留部分下载内容供下次续传。
             var res = downloadResumable(mirrorUrl, cache, onProgress)
             if (res !is Result.Ok || !isValidXzArchive(cache)) {
                 log("加速镜像下载失败或内容无效(${(res as? Result.Network)?.reason ?: res.javaClass.simpleName})，回退 GitHub 直连…", true)
-                cache.delete()
+                // 内容无效（如 HTML 错误页）时才删除缓存；网络错误保留部分文件供续传
+                if (cache.exists() && !isValidXzArchive(cache)) {
+                    cache.delete()
+                }
                 res = downloadResumable(fallbackUrl, cache, onProgress)
                 if (res is Result.Ok && !isValidXzArchive(cache)) {
                     log("GitHub 直连下载内容无效，可能镜像已损坏", true)
@@ -70,7 +89,8 @@ class ImageInstaller(
                 }
             }
             if (res !is Result.Ok) {
-                cache.delete()
+                // 网络错误等：保留已下载的部分文件，下次启动可续传
+                log("下载未完成，已保留部分缓存供下次续传", false)
                 return@withContext res
             }
 
@@ -92,7 +112,7 @@ class ImageInstaller(
             cache.delete()
             extractRes
         } catch (e: Throwable) {
-            cache.delete()
+            // 异常时也保留缓存文件，供下次续传
             log("镜像下载/解压异常: ${e.message ?: e.javaClass.simpleName}", true)
             Result.Failed(e.message ?: "unknown")
         }
@@ -127,7 +147,7 @@ class ImageInstaller(
         onExtractProgress: ((processed: Long, total: Long) -> Unit)? = null,
         onExtractEntry: ((String) -> Unit)? = null
     ): Result = withContext(Dispatchers.IO) {
-        FileUtils.cleanDownloadCache(context)
+        // 注意：不调用 cleanDownloadCache，避免误删当前正在解压的本地导入归档文件。
         val res = extractLocal(destRootfs, archive, onExtractProgress, onExtractEntry)
         archive.delete()
         res

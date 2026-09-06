@@ -27,6 +27,13 @@ object XZExtractor {
 
     private const val BUF = 64 * 1024
 
+    /**
+     * 每处理 N 个 tar 条目后短暂让出 CPU/IO，避免解压大量小文件（如图标）时
+     * 占满整机资源导致 Android 系统 UI 无响应。3ms ≈ 让出约 1 个时间片。
+     */
+    private const val THROTTLE_EVERY = 50
+    private const val THROTTLE_MS = 3L
+
     fun extract(
         archive: File,
         destDir: File,
@@ -76,6 +83,7 @@ object XZExtractor {
         val buf = ByteArray(BUF)
         return try {
             var entry: TarArchiveEntry? = tarStream.nextTarEntry
+            var entryCount = 0
             while (entry != null) {
                 val name = entry.name
                 if (name.contains("..") || name.startsWith("/")) {
@@ -111,6 +119,12 @@ object XZExtractor {
                         }
                     }
                     onEntry?.invoke(name, entry.size)
+                }
+                // 分片节流：每处理一定数量的条目后短暂休眠，
+                // 避免解压大量小文件时占满 CPU/IO 导致整机卡死。
+                entryCount++
+                if (entryCount % THROTTLE_EVERY == 0) {
+                    Thread.sleep(THROTTLE_MS)
                 }
                 entry = tarStream.nextTarEntry
             }

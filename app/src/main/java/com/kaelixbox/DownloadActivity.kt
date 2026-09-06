@@ -21,6 +21,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -41,7 +43,9 @@ class DownloadActivity : AppCompatActivity() {
     private lateinit var b: ActivityDownloadBinding
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
+    private var heartbeatJob: Job? = null
     private var mode = MODE_DOWNLOAD
+    @Volatile private var lastExtractPct = 0
 
     private val pickFile = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -69,6 +73,7 @@ class DownloadActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        stopExtractHeartbeat()
         // 不取消 job，保持后台任务继续运行（仅在用户主动取消时才取消）
     }
 
@@ -199,6 +204,7 @@ class DownloadActivity : AppCompatActivity() {
     private fun setStage(stage: String) {
         when (stage) {
             "download" -> {
+                stopExtractHeartbeat()
                 b.stageText.setText(R.string.stage_download)
                 b.progressBar.isIndeterminate = false
                 b.progressSpinner.visibility = View.GONE
@@ -206,6 +212,7 @@ class DownloadActivity : AppCompatActivity() {
                 b.logScroll.visibility = View.GONE
             }
             "verify" -> {
+                stopExtractHeartbeat()
                 b.stageText.setText(R.string.stage_verify)
                 b.progressBar.isIndeterminate = true
                 b.speedText.visibility = View.GONE
@@ -219,6 +226,7 @@ class DownloadActivity : AppCompatActivity() {
                 b.speedText.visibility = View.GONE
                 b.sizeText.visibility = View.GONE
                 b.logScroll.visibility = View.VISIBLE
+                startExtractHeartbeat()
             }
         }
     }
@@ -251,8 +259,34 @@ class DownloadActivity : AppCompatActivity() {
 
     private fun updateExtract(processed: Long, total: Long) {
         val pct = if (total > 0) (processed * 100 / total).toInt() else 0
+        lastExtractPct = pct
         b.progressBar.progress = pct
         b.percentText.text = getString(R.string.download_percent, pct)
+    }
+
+    /**
+     * 启动解压心跳：每隔 2 秒输出一次当前进度，
+     * 帮助用户区分「正在运行」和「真正卡死」。
+     * 即使没有新的文件条目被处理（如正在解压大文件），也会持续刷新状态。
+     */
+    private fun startExtractHeartbeat() {
+        stopExtractHeartbeat()
+        heartbeatJob = scope.launch {
+            var tick = 0
+            while (isActive) {
+                delay(2000)
+                tick++
+                val pct = lastExtractPct
+                withContext(Dispatchers.Main) {
+                    appendLog("解压进行中… $pct%（心跳 #$tick）")
+                }
+            }
+        }
+    }
+
+    private fun stopExtractHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = null
     }
 
     private fun handleResult(
@@ -260,6 +294,7 @@ class DownloadActivity : AppCompatActivity() {
         cfg: ContainerConfig,
         isDownload: Boolean
     ) {
+        stopExtractHeartbeat()
         lockButtons(false)
         b.btnCancel.visibility = View.GONE
         when (r) {
